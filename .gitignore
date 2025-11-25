@@ -1,4 +1,5 @@
 chirp_fingerprint.json
+baseline.json
 chirp_report*.md
 events.csv
 training/
