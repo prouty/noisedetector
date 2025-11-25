@@ -29,6 +29,22 @@ restart:
 	@echo "==> Restarting noise-monitor service on Pi..."
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl restart noise-monitor'
 
+stop:
+	@echo "==> Stopping noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor'
+
+start:
+	@echo "==> Starting noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
+
+status:
+	@echo "==> Checking status of noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl status noise-monitor'
+
+logs:
+	@echo "==> Viewing logs of noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo journalctl -u noise-monitor -f'
+
 report:
 	@echo "==> Generating chirp report from events.csv..."
 	cd $(LOCAL_DIR) && python3 generate_chirp_report.py
