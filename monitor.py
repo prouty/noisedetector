@@ -299,10 +299,13 @@ def run_monitor():
                         is_chirp = False
                         similarity = None
 
-                        # For chirp classification, use only actual event chunks (exclude pre-roll and tail)
+                        # For chirp classification, use only actual event chunks (exclude pre-roll)
+                        # Note: The ending chunk (below threshold) is never appended to event_chunks,
+                        # so the last chunk in event_chunks is the last valid event chunk.
                         if event_chunks is not None and event_actual_start_idx is not None:
-                            # Use chunks from actual event start up to (but not including) this ending chunk
-                            actual_event_chunks = event_chunks[event_actual_start_idx:-1] if len(event_chunks) > event_actual_start_idx + 1 else event_chunks[event_actual_start_idx:]
+                            # Use all chunks from actual event start to the end
+                            # (the ending chunk below threshold was never added, so no need to exclude it)
+                            actual_event_chunks = event_chunks[event_actual_start_idx:]
                             if actual_event_chunks:
                                 is_chirp, similarity = classify_event_is_chirp(actual_event_chunks, fingerprint_info)
 

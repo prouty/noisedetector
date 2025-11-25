@@ -1,8 +1,22 @@
 #!/usr/bin/env bash
 
-PI_USER="prouty"
-PI_HOST="raspberrypi.local"
-REMOTE_DIR="/home/prouty/projects/noisedetector"
+# Load environment variables from .env file if it exists
+if [ -f .env ]; then
+    set -a  # automatically export all variables
+    # Filter out comments and empty lines, then source
+    tmpfile=$(mktemp)
+    # Remove lines that start with # (with optional leading whitespace) or are empty
+    sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' .env > "$tmpfile"
+    source "$tmpfile"
+    rm "$tmpfile"
+    set +a
+fi
+
+# Use environment variables with defaults
+PI_USER="${PI_USER:-prouty}"
+PI_HOSTNAME="${PI_HOSTNAME:-raspberrypi.local}"
+PI_HOST="${PI_USER}@${PI_HOSTNAME}"
+REMOTE_DIR="${PI_DIR:-/home/prouty/projects/noisedetector}"
 
 # This rsync command syncs all files and folders in the current directory (./)
 # to the remote target, except for the files and directories explicitly excluded below.
@@ -18,7 +32,7 @@ rsync -avz \
 	--exclude 'venv' \
 	--exclude '.git' \
 	./ \
-	"$PI_USER"@"$PI_HOST":"$REMOTE_DIR"
+	"$PI_HOST":"$REMOTE_DIR"
 
 
 

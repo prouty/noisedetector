@@ -6,3 +6,4 @@ training/
 clips/
 venv/
 .DS_Store
+.env

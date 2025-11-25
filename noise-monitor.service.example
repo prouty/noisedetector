@@ -1,0 +1,13 @@
+[Unit]
+Description=Noise Monitor and Recorder
+After=network.target sound.target
+
+[Service]
+WorkingDirectory=${SERVICE_WORKING_DIR}
+ExecStart=/usr/bin/python3 ${SERVICE_WORKING_DIR}/noise_detector.py monitor
+Restart=always
+User=${SERVICE_USER}
+
+[Install]
+WantedBy=multi-user.target
+

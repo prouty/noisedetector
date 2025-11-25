@@ -1,6 +1,13 @@
-PI_HOST = prouty@raspberrypi.local
-PI_DIR  = /home/prouty/projects/noisedetector
-LOCAL_DIR = $(HOME)/projects/noisedetector
+# Load environment variables from .env file if it exists
+-include .env
+export
+
+# Default values if not set in .env
+PI_USER ?= prouty
+PI_HOSTNAME ?= raspberrypi.local
+PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
+PI_DIR ?= /home/prouty/projects/noisedetector
+LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
 .PHONY: pull train deploy restart report workflow
 

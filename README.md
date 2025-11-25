@@ -22,7 +22,8 @@ noisedetector/
 ├── train_chirp_fingerprint.py  # Train chirp classifier from WAV files
 ├── generate_chirp_report.py    # Generate reports from events.csv
 ├── deploy_to_pi.sh        # Deploy code to Raspberry Pi
-├── noise-monitor.service   # Systemd service file
+├── install_service.sh     # Generate systemd service file from template
+├── noise-monitor.service.example  # Systemd service template
 ├── Makefile                # Common workflow commands
 ├── requirements.txt        # Python dependencies
 ├── clips/                  # Event audio clips (clip_YYYY-MM-DD_HH-MM-SS.wav)
@@ -30,6 +31,27 @@ noisedetector/
 ├── events.csv              # Event log (timestamp, duration, classification)
 └── baseline.json           # Baseline noise level configuration
 ```
+
+## Configuration
+
+### Environment Variables
+
+Create a `.env` file in the project root to customize paths and connection settings:
+
+```bash
+cp .env.example .env
+# Edit .env with your settings
+```
+
+Available variables:
+- `PI_USER`: SSH username for Raspberry Pi (default: `prouty`)
+- `PI_HOSTNAME`: Raspberry Pi hostname or IP without username (default: `raspberrypi.local`)
+- `PI_DIR`: Remote project directory on Pi (default: `/home/prouty/projects/noisedetector`)
+- `LOCAL_DIR`: Local project directory (default: `$HOME/projects/noisedetector`)
+- `SERVICE_USER`: User to run systemd service as (default: same as `PI_USER`)
+- `SERVICE_WORKING_DIR`: Working directory for systemd service (default: same as `PI_DIR`)
+
+All scripts and Makefile commands will automatically use these values if set.
 
 ## Setup
 
@@ -55,12 +77,19 @@ noisedetector/
    ```
 
 4. **Install systemd service:**
+   
+   On your development machine, generate the service file (uses `.env` for configuration):
    ```bash
-   sudo cp noise-monitor.service /etc/systemd/system/
-   sudo systemctl daemon-reload
-   sudo systemctl enable noise-monitor
-   sudo systemctl start noise-monitor
+   ./install_service.sh
    ```
+   
+   This creates `/tmp/noise-monitor.service` with your settings. Then copy it to the Pi and install:
+   ```bash
+   scp /tmp/noise-monitor.service ${PI_USER}@${PI_HOSTNAME}:/tmp/
+   ssh ${PI_USER}@${PI_HOSTNAME} "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable noise-monitor && sudo systemctl start noise-monitor"
+   ```
+   
+   Or manually edit `noise-monitor.service.example`, replace `${SERVICE_USER}` and `${SERVICE_WORKING_DIR}`, and copy to `/etc/systemd/system/`.
 
 ### On Development Machine (Mac/Linux)
 
@@ -135,11 +164,13 @@ This syncs all files except:
 - `events.csv`, `baseline.json`
 - `.DS_Store`
 
+The script uses environment variables from `.env` or defaults. Ensure your `.env` file is configured with your Pi connection details.
+
 ### Manual Deployment
 
 ```bash
 rsync -avz --exclude='.git' --exclude='venv' --exclude='clips' \
-  ./ prouty@raspberrypi.local:/home/prouty/projects/noisedetector/
+  ./ ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/
 ```
 
 ## Service Management
@@ -171,9 +202,9 @@ journalctl -u noise-monitor -n 100
 # Pull events.csv and clips
 make pull
 
-# Or manually:
-rsync -avz prouty@raspberrypi.local:/home/prouty/projects/noisedetector/events.csv ./
-rsync -avz prouty@raspberrypi.local:/home/prouty/projects/noisedetector/clips/ ./clips/
+# Or manually (uses env vars from .env):
+rsync -avz ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/events.csv ./
+rsync -avz ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/clips/ ./clips/
 ```
 
 ### Push Code to Pi
@@ -213,8 +244,9 @@ Reports are saved as `chirp_report_YYYY-MM-DD.md`.
 ## SSH Access
 
 ```bash
-ssh prouty@raspberrypi.local
-hostname -I                  # Get Pi IP address
+ssh ${PI_USER}@${PI_HOSTNAME}
+# or
+ssh ${PI_USER}@${PI_HOSTNAME} "hostname -I"  # Get Pi IP address
 ```
 
 ## System Commands
