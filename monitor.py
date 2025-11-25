@@ -47,6 +47,13 @@ INT16_FULL_SCALE = 32768.0            # 2^15, maps int16 to roughly [-1.0, 1.0)
 FINGERPRINT_FILE = Path("chirp_fingerprint.json")
 CHIRP_SIMILARITY_THRESHOLD = 0.8  # start here, we can tune later
 
+# Frequency filtering to reject fan noise (lower pitch)
+# With sample_rate=16000 and fft_size=2048, each bin ≈ 7.8 Hz
+# Fan noise typically 50-500 Hz, chirps typically 1-4 kHz+
+FAN_NOISE_MAX_FREQ_HZ = 500      # Maximum frequency for fan noise range
+CHIRP_MIN_FREQ_HZ = 1000          # Minimum frequency for chirp range
+LOW_FREQ_ENERGY_THRESHOLD = 0.3   # Reject if low-freq energy > this fraction of total
+
 
 def dbfs(value: float, eps: float = 1e-12) -> float:
     """Convert linear amplitude (0.0–1.0) to dBFS."""
@@ -454,6 +461,26 @@ def classify_event_is_chirp(event_chunks, fingerprint_info):
     if event_spec is None:
         return False, None
 
+    # Frequency-domain filtering: reject events with too much low-frequency energy (fan noise)
+    # Calculate frequency bins
+    freq_resolution = sr / fft_size  # Hz per bin
+    fan_noise_max_bin = int(FAN_NOISE_MAX_FREQ_HZ / freq_resolution)
+    chirp_min_bin = int(CHIRP_MIN_FREQ_HZ / freq_resolution)
+    
+    # Calculate energy in different frequency ranges
+    total_energy = np.sum(event_spec)
+    if total_energy > 0:
+        low_freq_energy = np.sum(event_spec[:fan_noise_max_bin])
+        high_freq_energy = np.sum(event_spec[chirp_min_bin:])
+        low_freq_ratio = low_freq_energy / total_energy
+        high_freq_ratio = high_freq_energy / total_energy
+        
+        # Reject if too much low-frequency energy (fan noise) or insufficient high-frequency energy (chirp)
+        if low_freq_ratio > LOW_FREQ_ENERGY_THRESHOLD:
+            return False, None  # Too much fan noise, not a chirp
+        if high_freq_ratio < 0.1:  # Need at least 10% energy in chirp frequency range
+            return False, None  # Insufficient high-frequency content
+    
     sim = float(np.dot(fp, event_spec))  # cosine similarity (because both normalized)
     is_chirp = sim >= CHIRP_SIMILARITY_THRESHOLD
     return is_chirp, sim
