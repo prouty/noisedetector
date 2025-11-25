@@ -124,6 +124,7 @@ def ensure_events_header():
                 "clip_file",
                 "is_chirp",
                 "chirp_similarity",
+                "reviewed",
             ])
 
 
@@ -145,6 +146,7 @@ def log_event(event):
             str(event.get("clip_file", "")),
             "TRUE" if event.get("is_chirp") else "FALSE",
             f"{event.get('chirp_similarity', 0.0):.3f}" if event.get("chirp_similarity") is not None else "",
+            event.get("reviewed", ""),  # User can fill this in manually
         ])
     print(
         f"[EVENT] Logged event: {event['start_timestamp']} – {event['end_timestamp']} "
