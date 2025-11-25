@@ -6,56 +6,36 @@ A Raspberry Pi-based audio monitoring system that detects noise events, records 
 
 - **Continuous Audio Monitoring**: Records 5-minute audio segments while monitoring for noise events
 - **Event Detection**: Detects noise events above a configurable baseline threshold
-- **Chirp Classification**: Uses spectral fingerprinting to identify specific chirp sounds
+- **Chirp Classification**: Uses spectral fingerprinting to identify specific chirp sounds with frequency filtering to reject fan noise
 - **Event Clips**: Automatically saves short audio clips of detected events with pre-roll context
 - **Event Logging**: Records all events to CSV with timestamps, duration, and classification results
-- **Baseline Tracking**: Maintains a rolling baseline for adaptive noise detection
-
-## Project Structure
-
-```
-noisedetector/
-├── monitor.py              # Main monitoring script with event detection
-├── noise_detector.py       # CLI interface and menu system
-├── baseline.py             # Baseline noise level measurement
-├── sampler.py              # Live audio sampling utility
-├── train_chirp_fingerprint.py  # Train chirp classifier from WAV files
-├── generate_chirp_report.py    # Generate reports from events.csv
-├── deploy_to_pi.sh        # Deploy code to Raspberry Pi
-├── install_service.sh     # Generate systemd service file from template
-├── noise-monitor.service.example  # Systemd service template
-├── Makefile                # Common workflow commands
-├── requirements.txt        # Python dependencies
-├── clips/                  # Event audio clips (clip_YYYY-MM-DD_HH-MM-SS.wav)
-├── training/chirp/         # Training data for chirp fingerprint
-├── events.csv              # Event log (timestamp, duration, classification)
-└── baseline.json           # Baseline noise level configuration
-```
 
 ## Configuration
 
-### Environment Variables
-
-Create a `.env` file in the project root to customize paths and connection settings:
+Create a `.env` file from `.env.example` to customize Pi connection settings:
 
 ```bash
 cp .env.example .env
 # Edit .env with your settings
 ```
 
-Available variables:
-- `PI_USER`: SSH username for Raspberry Pi (default: `prouty`)
-- `PI_HOSTNAME`: Raspberry Pi hostname or IP without username (default: `raspberrypi.local`)
-- `PI_DIR`: Remote project directory on Pi (default: `/home/prouty/projects/noisedetector`)
+**Environment Variables:**
+- `PI_USER`: SSH username (default: `prouty`)
+- `PI_HOSTNAME`: Pi hostname or IP (default: `raspberrypi.local`)
+- `PI_DIR`: Remote project directory (default: `/home/prouty/projects/noisedetector`)
 - `LOCAL_DIR`: Local project directory (default: `$HOME/projects/noisedetector`)
-- `SERVICE_USER`: User to run systemd service as (default: same as `PI_USER`)
-- `SERVICE_WORKING_DIR`: Working directory for systemd service (default: same as `PI_DIR`)
+- `SERVICE_USER`: Service user (defaults to `PI_USER`)
+- `SERVICE_WORKING_DIR`: Service working directory (defaults to `PI_DIR`)
 
-All scripts and Makefile commands will automatically use these values if set.
+**Audio Settings** (in `monitor.py`):
+- `DEVICE`: ALSA audio device (default: `"plughw:CARD=Device,DEV=0"`)
+- `SAMPLE_RATE`: Audio sample rate in Hz (default: `16000`)
+- `THRESHOLD_ABOVE_BASELINE_DB`: Event detection threshold (default: `10.0` dB)
+- `CHIRP_SIMILARITY_THRESHOLD`: Chirp classification threshold (default: `0.8`)
 
 ## Setup
 
-### On Raspberry Pi
+### Raspberry Pi
 
 1. **Install dependencies:**
    ```bash
@@ -66,208 +46,106 @@ All scripts and Makefile commands will automatically use these values if set.
 
 2. **Configure audio device:**
    ```bash
-   arecord -l                    # List audio devices
-   arecord -L                   # List PCM devices
+   arecord -l    # List audio devices
    ```
-   Update `DEVICE` in `monitor.py` with your audio device (e.g., `plughw:CARD=Device,DEV=0`)
+   Update `DEVICE` in `monitor.py` with your audio device.
 
-3. **Set baseline noise level:**
+3. **Set baseline:**
    ```bash
    python3 noise_detector.py baseline
    ```
 
-4. **Install systemd service:**
-   
-   On your development machine, generate the service file (uses `.env` for configuration):
+4. **Install service:**
    ```bash
+   # On development machine
    ./install_service.sh
-   ```
-   
-   This creates `/tmp/noise-monitor.service` with your settings. Then copy it to the Pi and install:
-   ```bash
    scp /tmp/noise-monitor.service ${PI_USER}@${PI_HOSTNAME}:/tmp/
    ssh ${PI_USER}@${PI_HOSTNAME} "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable noise-monitor && sudo systemctl start noise-monitor"
    ```
-   
-   Or manually edit `noise-monitor.service.example`, replace `${SERVICE_USER}` and `${SERVICE_WORKING_DIR}`, and copy to `/etc/systemd/system/`.
 
-### On Development Machine (Mac/Linux)
+### Development Machine
 
-1. **Clone repository and set up virtual environment:**
+1. **Setup:**
    ```bash
-   make init                    # Create virtual environment
-   make shell                   # Activate venv and start shell
+   make init && make shell
    pip install -r requirements.txt
    ```
 
 2. **Train chirp fingerprint:**
-   - Place chirp training files in `training/chirp/` (named `chirp_*.wav`)
-   - Run: `make train` or `python3 train_chirp_fingerprint.py`
+   - Place training files in `training/chirp/` as `chirp_*.wav`
+   - Run: `make train`
 
 ## Usage
-
-### Interactive Menu
-
-```bash
-python3 noise_detector.py
-```
-
-Options:
-1. Set baseline noise level
-2. Take a sample (live RMS/peak only)
-3. Run full noise monitor
-4. Show last baseline
-5. Exit
 
 ### Direct Commands
 
 ```bash
-python3 noise_detector.py monitor        # Start monitoring
-python3 noise_detector.py baseline       # Set baseline
-python3 noise_detector.py sample         # Live sample
-python3 noise_detector.py show-baseline  # Show baseline
+python3 noise_detector.py              # Interactive menu
+python3 noise_detector.py monitor      # Start monitoring
+python3 noise_detector.py baseline     # Set baseline
+python3 noise_detector.py sample       # Live sample
 ```
 
 ### Makefile Commands
 
-```bash
-make pull      # Pull events.csv and clips from Pi
-make train     # Train chirp fingerprint from training/chirp/*.wav
-make deploy    # Deploy chirp_fingerprint.json to Pi
-make restart   # Restart noise-monitor service on Pi
-make report    # Generate chirp report from events.csv
-make workflow  # Run pull + report
-```
+All commands use `.env` configuration automatically.
 
-## Configuration
+**Data & Reports:**
+- `make pull` - Pull events.csv and clips from Pi
+- `make report` - Generate chirp report
+- `make workflow` - Pull + report
 
-Key settings in `monitor.py`:
+**Chirp Classification:**
+- `make train` - Train fingerprint from training/chirp/*.wav
+- `make deploy` - Deploy fingerprint to Pi
 
-- `DEVICE`: ALSA audio device (default: `"plughw:CARD=Device,DEV=0"`)
-- `SAMPLE_RATE`: Audio sample rate in Hz (default: `16000`)
-- `THRESHOLD_ABOVE_BASELINE_DB`: Event detection threshold (default: `10.0` dB)
-- `MIN_EVENT_DURATION_SEC`: Minimum event duration (default: `0.5` seconds)
-- `PRE_ROLL_SEC`: Audio before event in clips (default: `2.0` seconds)
-- `CHIRP_SIMILARITY_THRESHOLD`: Chirp classification threshold (default: `0.8`)
+**Service Management:**
+- `make start` - Start service on Pi
+- `make stop` - Stop service on Pi
+- `make restart` - Restart service on Pi
+- `make status` - Check service status
+- `make logs` - View live logs
 
-## Deployment
+**Development:**
+- `make init` - Create virtual environment
+- `make shell` - Activate venv and start shell
 
-### Deploy Code to Pi
-
-```bash
-./deploy_to_pi.sh
-```
-
-This syncs all files except:
-- `.git/`, `venv/`, `__pycache__/`
-- `clips/`, `training/`, `recordings/`
-- `events.csv`, `baseline.json`
-- `.DS_Store`
-
-The script uses environment variables from `.env` or defaults. Ensure your `.env` file is configured with your Pi connection details.
-
-### Manual Deployment
-
-```bash
-rsync -avz --exclude='.git' --exclude='venv' --exclude='clips' \
-  ./ ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/
-```
-
-## Service Management
-
-### Start/Stop Service
-
-```bash
-sudo systemctl start noise-monitor
-sudo systemctl stop noise-monitor
-sudo systemctl restart noise-monitor
-sudo systemctl status noise-monitor
-```
-
-### View Logs
-
-```bash
-# Follow logs live
-journalctl -u noise-monitor -f
-
-# View recent logs
-journalctl -u noise-monitor -n 100
-```
-
-## File Transfer
-
-### Pull Data from Pi
-
-```bash
-# Pull events.csv and clips
-make pull
-
-# Or manually (uses env vars from .env):
-rsync -avz ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/events.csv ./
-rsync -avz ${PI_USER}@${PI_HOSTNAME}:${PI_DIR}/clips/ ./clips/
-```
-
-### Push Code to Pi
-
-```bash
-./deploy_to_pi.sh
-```
-
-## Audio Debugging
-
-```bash
-arecord -l                    # List audio capture devices
-arecord -L                   # List PCM devices
-aplay test.wav               # Test playback
-```
+**Deployment:**
+- `./deploy_to_pi.sh` - Deploy code to Pi (excludes clips, training, venv, .git)
 
 ## Chirp Classification
 
-### Training
+1. Collect chirp samples → `training/chirp/chirp_*.wav`
+2. Train: `make train`
+3. Deploy: `make deploy`
+4. Restart: `make restart`
 
-1. Collect chirp audio samples and place in `training/chirp/` as `chirp_*.wav`
-2. Train fingerprint: `make train` or `python3 train_chirp_fingerprint.py`
-3. Deploy to Pi: `make deploy`
-4. Restart service: `make restart`
-
-### Reports
-
-Generate reports from events:
-```bash
-make report
-# or
-python3 generate_chirp_report.py
-```
-
-Reports are saved as `chirp_report_YYYY-MM-DD.md`.
-
-## SSH Access
-
-```bash
-ssh ${PI_USER}@${PI_HOSTNAME}
-# or
-ssh ${PI_USER}@${PI_HOSTNAME} "hostname -I"  # Get Pi IP address
-```
-
-## System Commands
-
-```bash
-sudo reboot                  # Reboot Pi
-sudo shutdown now            # Shutdown Pi
-```
+The algorithm uses frequency filtering to reject fan noise (low-pitched sounds below 500 Hz) and requires significant energy in chirp range (1000+ Hz).
 
 ## Output Files
 
-- **`events.csv`**: Event log with timestamps, duration, peak/RMS levels, and chirp classification
+- **`events.csv`**: Event log with timestamps, duration, peak/RMS levels, chirp classification, and `reviewed` column
 - **`clips/clip_*.wav`**: Audio clips of detected events
-- **`baseline.json`**: Baseline noise level configuration
-- **`chirp_fingerprint.json`**: Trained chirp classifier fingerprint
+- **`baseline.json`**: Baseline noise level
+- **`chirp_fingerprint.json`**: Trained classifier
 - **`chirp_report_*.md`**: Generated reports
 
 ## Troubleshooting
 
-1. **Service not starting**: Check logs with `journalctl -u noise-monitor -n 50`
-2. **No audio detected**: Verify device with `arecord -l` and update `DEVICE` in `monitor.py`
-3. **Too many false positives**: Adjust `THRESHOLD_ABOVE_BASELINE_DB` or recalibrate baseline
-4. **Chirp classification inaccurate**: Retrain with more/better training samples and adjust `CHIRP_SIMILARITY_THRESHOLD`
+- **Service not starting**: `make logs` or `journalctl -u noise-monitor -n 50`
+- **No audio**: Verify with `arecord -l` and update `DEVICE` in `monitor.py`
+- **False positives**: Adjust `THRESHOLD_ABOVE_BASELINE_DB` or recalibrate baseline
+- **Chirp misclassification**: Retrain with better samples or adjust `CHIRP_SIMILARITY_THRESHOLD`
 
+## Quick Reference
+
+```bash
+# SSH to Pi
+ssh ${PI_USER}@${PI_HOSTNAME}
+
+# View logs on Pi
+journalctl -u noise-monitor -f
+
+# Reboot Pi
+ssh ${PI_USER}@${PI_HOSTNAME} "sudo reboot"
+```
