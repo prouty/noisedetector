@@ -54,6 +54,11 @@ FAN_NOISE_MAX_FREQ_HZ = 500      # Maximum frequency for fan noise range
 CHIRP_MIN_FREQ_HZ = 1000          # Minimum frequency for chirp range
 LOW_FREQ_ENERGY_THRESHOLD = 0.3   # Reject if low-freq energy > this fraction of total
 
+# Temporal filtering to reject sustained sounds (door opening/closing)
+# Chirps are quick and staccato, door sounds are drawn out
+CHIRP_MAX_DURATION_SEC = 2.0      # Maximum duration for chirp (reject longer events)
+CHIRP_ENERGY_CONCENTRATION = 0.5  # At least 50% of energy should be in first half of event
+
 
 def dbfs(value: float, eps: float = 1e-12) -> float:
     """Convert linear amplitude (0.0–1.0) to dBFS."""
@@ -316,7 +321,7 @@ def run_monitor():
                             # (the ending chunk below threshold was never added, so no need to exclude it)
                             actual_event_chunks = event_chunks[event_actual_start_idx:]
                             if actual_event_chunks:
-                                is_chirp, similarity = classify_event_is_chirp(actual_event_chunks, fingerprint_info)
+                                is_chirp, similarity = classify_event_is_chirp(actual_event_chunks, fingerprint_info, duration_sec)
 
                         # Compute offset within segment
                         offset_sec = (event_start_offset_samples or 0) / float(SAMPLE_RATE)
@@ -451,13 +456,17 @@ def compute_event_spectrum_from_chunks(chunks, sample_rate, fft_size):
     return avg_spec
 
 
-def classify_event_is_chirp(event_chunks, fingerprint_info):
+def classify_event_is_chirp(event_chunks, fingerprint_info, duration_sec):
     if fingerprint_info is None:
         return False, None
 
     fp = fingerprint_info["fingerprint"]
     fft_size = fingerprint_info["fft_size"]
     sr = fingerprint_info["sample_rate"]
+
+    # Temporal filtering: reject events that are too long (door sounds are drawn out)
+    if duration_sec > CHIRP_MAX_DURATION_SEC:
+        return False, None  # Too long, likely a door sound or other sustained noise
 
     event_spec = compute_event_spectrum_from_chunks(event_chunks, sr, fft_size)
     if event_spec is None:
@@ -482,6 +491,28 @@ def classify_event_is_chirp(event_chunks, fingerprint_info):
             return False, None  # Too much fan noise, not a chirp
         if high_freq_ratio < 0.1:  # Need at least 10% energy in chirp frequency range
             return False, None  # Insufficient high-frequency content
+    
+    # Temporal envelope analysis: chirps should have energy concentrated early (staccato)
+    # Calculate RMS energy per chunk to analyze temporal distribution
+    chunk_rms_values = []
+    for chunk in event_chunks:
+        samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
+        if len(samples) > 0:
+            rms = float(np.sqrt(np.mean(samples ** 2)))
+            chunk_rms_values.append(rms)
+    
+    if len(chunk_rms_values) > 1:
+        # Calculate energy concentration in first half vs second half
+        mid_point = len(chunk_rms_values) // 2
+        first_half_energy = sum(r**2 for r in chunk_rms_values[:mid_point])
+        second_half_energy = sum(r**2 for r in chunk_rms_values[mid_point:])
+        total_chunk_energy = first_half_energy + second_half_energy
+        
+        if total_chunk_energy > 0:
+            energy_concentration = first_half_energy / total_chunk_energy
+            # Reject if energy is too evenly distributed (sustained sound like door)
+            if energy_concentration < CHIRP_ENERGY_CONCENTRATION:
+                return False, None  # Energy too spread out, likely a sustained sound
     
     sim = float(np.dot(fp, event_spec))  # cosine similarity (because both normalized)
     is_chirp = sim >= CHIRP_SIMILARITY_THRESHOLD
