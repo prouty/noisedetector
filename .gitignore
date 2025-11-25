@@ -1,0 +1,6 @@
+chirp_fingerprint.json
+chirp_report*.md
+events.csv
+training/
+clips/
+venv/

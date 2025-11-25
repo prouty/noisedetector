@@ -1,0 +1,12 @@
+[Unit]
+Description=Noise Monitor and Recorder
+After=network.target sound.target
+
+[Service]
+WorkingDirectory=/home/prouty/projects/noisedetector
+ExecStart=/usr/bin/python3 /home/prouty/projects/noisedetector/noise_detector.py monitor
+Restart=always
+User=prouty
+
+[Install]
+WantedBy=multi-user.target
