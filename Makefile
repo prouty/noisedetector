@@ -25,9 +25,9 @@ deploy:
 	@echo "==> Deploying chirp_fingerprint.json to Pi..."
 	rsync -avz $(LOCAL_DIR)/chirp_fingerprint.json $(PI_HOST):$(PI_DIR)/
 
-restart:
-	@echo "==> Restarting noise-monitor service on Pi..."
-	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl restart noise-monitor'
+reload:
+	@echo "==> Reloading noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl daemon-reload'
 
 stop:
 	@echo "==> Stopping noise-monitor service on Pi..."
