@@ -7,7 +7,7 @@ LOCAL_DIR = $(HOME)/projects/noisedetector
 pull:
 	@echo "==> Pulling events.csv and clips from Pi..."
 	rsync -avz $(PI_HOST):$(PI_DIR)/events.csv $(LOCAL_DIR)/
-	rsync -avz --include="*/" --include="*.wav" --exclude="*" \
+	rsync -avzu --exclude='.DS_Store' --include="*/" --include="clip_*.wav" --exclude="*" \
 		$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/
 
 train:
@@ -26,4 +26,12 @@ report:
 	@echo "==> Generating chirp report from events.csv..."
 	cd $(LOCAL_DIR) && python3 generate_chirp_report.py
 
-workflow: pull train deploy restart report
+init:
+	@echo "==> Initializing Python virtual environment locally..."
+	python3 -m venv venv
+
+shell:
+	@echo "==> Activating virtual environment and starting zsh locally..."
+	@source venv/bin/activate && exec zsh
+
+workflow: pull report

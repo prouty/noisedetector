@@ -4,3 +4,4 @@ events.csv
 training/
 clips/
 venv/
+.DS_Store

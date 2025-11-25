@@ -197,6 +197,7 @@ def run_monitor():
     # Clip state
     pre_roll_buffer = deque(maxlen=PRE_ROLL_CHUNKS)  # raw bytes
     event_chunks = None  # list of raw bytes that will become the clip
+    event_actual_start_idx = None  # index in event_chunks where actual event starts (after pre-roll)
 
     try:
         # Setup initial segment
@@ -269,11 +270,16 @@ def run_monitor():
                     event_segment_file = str(current_path) if current_path else None
 
                     # Build initial clip buffer: pre-roll + current chunk
+                    # Note: pre-roll is kept for clip saving (context), but chirp classification
+                    # will use only the actual event chunks (see classify_event_is_chirp)
                     if pre_roll_buffer:
                         event_chunks = list(pre_roll_buffer)
                     else:
                         event_chunks = []
                     event_chunks.append(data)
+                    
+                    # Track where actual event starts (after pre-roll) for chirp classification
+                    event_actual_start_idx = len(event_chunks) - 1  # Index of first actual event chunk
             else:
                 # Already in event - update stats
                 event_end_time = timestamp
@@ -282,23 +288,23 @@ def run_monitor():
                 if rms_db > event_max_rms_db:
                     event_max_rms_db = rms_db
 
-                # Continuously append this chunk to the clip buffer
-                if event_chunks is not None:
-                    event_chunks.append(data)
-
                 # Check if event ended (back below baseline+threshold)
                 if rms_db <= threshold_db:
                     # Compute duration
                     duration_sec = (event_end_time - event_start_time).total_seconds()
                     if duration_sec >= MIN_EVENT_DURATION_SEC:
-                        # Save clip
+                        # Save clip (includes pre-roll for context)
                         clip_path = save_event_clip(event_start_time, event_chunks or [])
 
                         is_chirp = False
                         similarity = None
 
-                        if event_chunks is not None:
-                            is_chirp, similarity = classify_event_is_chirp(event_chunks, fingerprint_info)
+                        # For chirp classification, use only actual event chunks (exclude pre-roll and tail)
+                        if event_chunks is not None and event_actual_start_idx is not None:
+                            # Use chunks from actual event start up to (but not including) this ending chunk
+                            actual_event_chunks = event_chunks[event_actual_start_idx:-1] if len(event_chunks) > event_actual_start_idx + 1 else event_chunks[event_actual_start_idx:]
+                            if actual_event_chunks:
+                                is_chirp, similarity = classify_event_is_chirp(actual_event_chunks, fingerprint_info)
 
                         # Compute offset within segment
                         offset_sec = (event_start_offset_samples or 0) / float(SAMPLE_RATE)
@@ -311,6 +317,8 @@ def run_monitor():
                             "baseline_rms_db": event_baseline_at_start,
                             "segment_file": event_segment_file,
                             "segment_offset_sec": offset_sec,
+                            "is_chirp": is_chirp,
+                            "chirp_similarity": similarity,
                             "clip_file": clip_path,
                         }
                         log_event(event)
@@ -325,6 +333,11 @@ def run_monitor():
                     event_start_offset_samples = None
                     event_segment_file = None
                     event_chunks = None
+                    event_actual_start_idx = None
+                else:
+                    # Still in event - append this chunk to the clip buffer
+                    if event_chunks is not None:
+                        event_chunks.append(data)
 
             # Print live metrics (for your sanity while testing)
             baseline_str = f"{baseline_rms_db:6.1f}" if baseline_rms_db is not None else "  N/A "
@@ -378,7 +391,12 @@ def load_chirp_fingerprint():
         fp = fp / (np.linalg.norm(fp) + 1e-9)
         sr = data["sample_rate"]
         fft_size = data["fft_size"]
-        print(f"[INFO] Loaded chirp fingerprint from {FINGERPRINT_FILE}")
+        
+        # Validate sample rate matches current configuration
+        if sr != SAMPLE_RATE:
+            print(f"[WARN] Fingerprint sample rate ({sr} Hz) doesn't match SAMPLE_RATE ({SAMPLE_RATE} Hz). Chirp classification may be inaccurate.")
+        
+        print(f"[INFO] Loaded chirp fingerprint from {FINGERPRINT_FILE} (sr={sr}Hz, fft_size={fft_size})")
         return {"fingerprint": fp, "sample_rate": sr, "fft_size": fft_size}
     except Exception as e:
         print(f"[WARN] Failed to load chirp fingerprint: {e}")
@@ -400,10 +418,18 @@ def compute_event_spectrum_from_chunks(chunks, sample_rate, fft_size):
     window = np.hanning(fft_size)
     specs = []
 
-    for start in range(0, len(samples) - fft_size, hop):
-        chunk = samples[start:start + fft_size] * window
+    # Fix edge case: if samples exactly equals fft_size, ensure at least one window
+    max_start = max(0, len(samples) - fft_size)
+    if max_start == 0 and len(samples) >= fft_size:
+        # Single window case
+        chunk = samples[0:fft_size] * window
         spec = np.abs(np.fft.rfft(chunk))
         specs.append(spec)
+    else:
+        for start in range(0, max_start, hop):
+            chunk = samples[start:start + fft_size] * window
+            spec = np.abs(np.fft.rfft(chunk))
+            specs.append(spec)
 
     if not specs:
         return None
