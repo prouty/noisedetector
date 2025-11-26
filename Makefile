@@ -3,10 +3,10 @@
 export
 
 # Default values if not set in .env
-PI_USER ?= prouty
+PI_USER ?= piuser
 PI_HOSTNAME ?= raspberrypi.local
 PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
-PI_DIR ?= /home/prouty/projects/noisedetector
+PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
 .PHONY: pull train deploy restart report workflow
