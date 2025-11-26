@@ -7,7 +7,7 @@ import sys
 import argparse
 from pathlib import Path
 from collections import deque
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 
 import numpy as np
 import wave
@@ -244,6 +244,14 @@ def run_monitor(config_path: Optional[Path] = None):
 
             # Normalize to roughly -1.0..1.0 float
             float_samples = samples.astype(np.float32) / INT16_FULL_SCALE
+            
+            # Remove DC offset (common in Pi audio capture, especially USB mics)
+            # Use exponential moving average for DC tracking to handle slow drift
+            if not hasattr(run_monitor, '_dc_offset_ema'):
+                run_monitor._dc_offset_ema = 0.0
+            alpha = 0.001  # Slow adaptation for DC offset
+            run_monitor._dc_offset_ema = alpha * float(np.mean(float_samples)) + (1 - alpha) * run_monitor._dc_offset_ema
+            float_samples = float_samples - run_monitor._dc_offset_ema
 
             # Compute peak and RMS
             peak = float(np.max(np.abs(float_samples)))
@@ -263,7 +271,13 @@ def run_monitor(config_path: Optional[Path] = None):
 
                 if baseline_window:
                     # Use a low percentile to represent "typical quiet"
-                    baseline_rms_db = float(np.percentile(baseline_window, 20))
+                    # 20th percentile is good - it ignores occasional spikes while capturing true baseline
+                    # Also filter out any anomalously quiet values (likely dropouts or processing errors)
+                    valid_baseline = [v for v in baseline_window if np.isfinite(v) and v > -100]
+                    if valid_baseline:
+                        baseline_rms_db = float(np.percentile(valid_baseline, 20))
+                    else:
+                        baseline_rms_db = None
 
             # Determine threshold
             effective_baseline = baseline_rms_db if baseline_rms_db is not None else rms_db
@@ -438,6 +452,11 @@ def compute_event_spectrum_from_chunks(chunks, sample_rate, fft_size):
 
     raw = b"".join(chunks)
     samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
+    
+    # Remove DC offset before spectral analysis
+    # DC component can skew frequency analysis, especially on Pi hardware
+    dc_offset = np.mean(samples)
+    samples = samples - dc_offset
 
     if samples.shape[0] < fft_size:
         pad = fft_size - samples.shape[0]
@@ -459,6 +478,18 @@ def compute_event_spectrum_from_chunks(chunks, sample_rate, fft_size):
             chunk = samples[start:start + fft_size] * window
             spec = np.abs(np.fft.rfft(chunk))
             specs.append(spec)
+    
+    # Apply high-pass filter in frequency domain to remove very low-frequency noise
+    # This helps with Pi hardware artifacts and room rumble
+    if specs:
+        freq_resolution = sample_rate / fft_size
+        # Remove DC and very low frequencies (< 20 Hz typically)
+        # This is done after FFT to avoid phase issues with time-domain filtering
+        for i, spec in enumerate(specs):
+            # Zero out DC and very low frequencies
+            cutoff_bin = max(1, int(20.0 / freq_resolution))  # 20 Hz high-pass
+            spec[:cutoff_bin] = 0.0
+            specs[i] = spec
 
     if not specs:
         return None
@@ -522,6 +553,112 @@ def compute_spectral_centroid(spectrum: np.ndarray, sample_rate: int, fft_size: 
     return float(centroid)
 
 
+def find_best_chirp_segment(
+    event_chunks,
+    fingerprint_info,
+    config: Dict[str, Any]
+) -> Tuple[Optional[List[bytes]], Optional[float], Optional[str]]:
+    """
+    Find the best segment within event_chunks that matches the chirp fingerprint.
+    Uses sliding windows to find the segment with highest similarity and best frequency characteristics.
+    
+    Returns:
+        (best_chunks, best_similarity, rejection_reason) or (None, None, reason) if no good segment found
+    """
+    if fingerprint_info is None or not event_chunks:
+        return None, None, "no_fingerprint_or_chunks"
+    
+    chirp_cfg = config["chirp_classification"]
+    freq_cfg = chirp_cfg["frequency_filtering"]
+    fp = fingerprint_info["fingerprint"]
+    fft_size = fingerprint_info["fft_size"]
+    sr = fingerprint_info["sample_rate"]
+    
+    # Try different window sizes and positions
+    # Strategy: Try the last portion of the event (where chirp likely is), then try other segments
+    num_chunks = len(event_chunks)
+    if num_chunks < 1:
+        return None, None, "insufficient_chunks"
+    
+    # Window sizes to try (as fractions of total event)
+    # Start with smaller windows to focus on the end where chirp likely is
+    # Try very small windows first to isolate the chirp from initial noise
+    window_sizes = [0.14, 0.25, 0.33, 0.5, 0.75, 1.0]  # Last 1 chunk (~14%), 25%, 33%, 50%, 75%, full event
+    best_chunks = None
+    best_similarity = -1.0
+    best_score = -1.0  # Combined score considering similarity and frequency characteristics
+    
+    freq_resolution = sr / fft_size
+    fan_noise_max_bin = int(freq_cfg["fan_noise_max_freq_hz"] / freq_resolution)
+    chirp_min_bin = int(freq_cfg["chirp_min_freq_hz"] / freq_resolution)
+    
+    for window_size in window_sizes:
+        # Start from the end (most recent chunks, where chirp likely is)
+        num_chunks_in_window = max(1, int(num_chunks * window_size))
+        start_idx = num_chunks - num_chunks_in_window
+        window_chunks = event_chunks[start_idx:]
+        
+        if not window_chunks:
+            continue
+        
+        # Compute spectrum for this window
+        window_spec = compute_event_spectrum_from_chunks(window_chunks, sr, fft_size)
+        if window_spec is None:
+            continue
+        
+        # Calculate similarity
+        sim = float(np.dot(fp, window_spec))
+        
+        # Calculate frequency characteristics
+        total_energy = np.sum(window_spec)
+        if total_energy == 0:
+            continue
+        
+        low_freq_energy = np.sum(window_spec[:fan_noise_max_bin])
+        high_freq_energy = np.sum(window_spec[chirp_min_bin:])
+        low_freq_ratio = low_freq_energy / total_energy
+        high_freq_ratio = high_freq_energy / total_energy
+        
+        # Score: combine similarity with frequency quality
+        # Prefer segments with high similarity AND good frequency characteristics
+        # Give bonus for segments that pass frequency filters
+        freq_score = 1.0
+        passes_low_freq = low_freq_ratio <= freq_cfg["low_freq_energy_threshold"]
+        min_high_freq = freq_cfg.get("high_freq_energy_min_ratio", 0.1)
+        passes_high_freq = high_freq_ratio >= min_high_freq
+        
+        if passes_low_freq and passes_high_freq:
+            # Bonus for segments that pass both frequency filters
+            freq_score = 1.2
+        elif passes_low_freq:
+            # Slight bonus for passing low-freq filter
+            freq_score = 1.1
+        elif passes_high_freq:
+            # Slight bonus for passing high-freq filter
+            freq_score = 1.05
+        else:
+            # Penalize segments that fail both
+            if low_freq_ratio > freq_cfg["low_freq_energy_threshold"]:
+                freq_score *= (1.0 - (low_freq_ratio - freq_cfg["low_freq_energy_threshold"]))
+            if high_freq_ratio < min_high_freq:
+                freq_score *= (high_freq_ratio / min_high_freq)
+        
+        # Combined score: similarity weighted by frequency quality
+        # Also give slight preference to smaller windows (more focused on chirp)
+        window_size_factor = 1.0 + (1.0 - window_size) * 0.1  # Up to 10% bonus for smaller windows
+        combined_score = sim * max(0.0, freq_score) * window_size_factor
+        
+        if combined_score > best_score:
+            best_score = combined_score
+            best_similarity = sim
+            best_chunks = window_chunks
+    
+    if best_chunks is None or best_similarity < 0:
+        return None, None, "no_valid_segment"
+    
+    return best_chunks, best_similarity, None
+
+
 def classify_event_is_chirp(
     event_chunks, 
     fingerprint_info, 
@@ -530,6 +667,8 @@ def classify_event_is_chirp(
 ) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
     """
     Classify if event is a chirp.
+    Uses sliding window to find the best matching segment (handles cases where
+    noise at beginning masks chirp at end).
     
     Returns:
         (is_chirp, similarity, confidence, rejection_reason)
@@ -546,17 +685,30 @@ def classify_event_is_chirp(
     fft_size = fingerprint_info["fft_size"]
     sr = fingerprint_info["sample_rate"]
     
-    rejection_reasons = []
+    # Find the best segment within the event (handles noise at beginning, chirp at end)
+    # We do this BEFORE duration check because the best segment might be shorter than the full event
+    best_chunks, best_similarity, segment_reason = find_best_chirp_segment(
+        event_chunks, fingerprint_info, config
+    )
     
-    # Temporal filtering: reject events that are too long (door sounds are drawn out)
-    if duration_sec > temp_cfg["max_duration_sec"]:
-        return False, None, None, f"duration_too_long_{duration_sec:.1f}s"
+    if best_chunks is None:
+        return False, None, None, f"no_valid_segment_{segment_reason}"
     
-    event_spec = compute_event_spectrum_from_chunks(event_chunks, sr, fft_size)
+    # Calculate duration of the best segment (not the full event)
+    audio_cfg = config["audio"]
+    chunk_duration = audio_cfg["chunk_duration"]
+    best_segment_duration = len(best_chunks) * chunk_duration
+    
+    # Temporal filtering: reject if the best segment is too long (door sounds are drawn out)
+    if best_segment_duration > temp_cfg["max_duration_sec"]:
+        return False, best_similarity, None, f"duration_too_long_{best_segment_duration:.1f}s"
+    
+    # Use the best segment for classification
+    event_spec = compute_event_spectrum_from_chunks(best_chunks, sr, fft_size)
     if event_spec is None:
         return False, None, None, "spectrum_computation_failed"
     
-    # Frequency-domain filtering: reject events with too much low-frequency energy (fan noise)
+    # Frequency-domain filtering on the best segment
     freq_resolution = sr / fft_size  # Hz per bin
     fan_noise_max_bin = int(freq_cfg["fan_noise_max_freq_hz"] / freq_resolution)
     chirp_min_bin = int(freq_cfg["chirp_min_freq_hz"] / freq_resolution)
@@ -570,17 +722,26 @@ def classify_event_is_chirp(
         high_freq_ratio = high_freq_energy / total_energy
         
         # Reject if too much low-frequency energy (fan noise)
-        if low_freq_ratio > freq_cfg["low_freq_energy_threshold"]:
-            return False, None, None, f"too_much_low_freq_{low_freq_ratio:.2f}"
+        # Allow small tolerance if similarity is above threshold (chirp is likely present)
+        # This helps when there's residual noise (like a thud) mixed with the chirp
+        low_freq_threshold = freq_cfg["low_freq_energy_threshold"]
+        similarity_threshold = chirp_cfg["similarity_threshold"]
+        if best_similarity >= similarity_threshold:
+            # Good similarity - allow slightly more low-freq to handle residual noise from thuds/etc
+            # Allow up to 0.32 (instead of 0.30) when similarity is good
+            low_freq_threshold = min(0.32, low_freq_threshold + 0.02)
+        
+        if low_freq_ratio > low_freq_threshold:
+            return False, best_similarity, None, f"too_much_low_freq_{low_freq_ratio:.2f}"
         
         # Reject if insufficient high-frequency energy (chirp)
         min_high_freq = freq_cfg.get("high_freq_energy_min_ratio", 0.1)
         if high_freq_ratio < min_high_freq:
-            return False, None, None, f"insufficient_high_freq_{high_freq_ratio:.2f}"
+            return False, best_similarity, None, f"insufficient_high_freq_{high_freq_ratio:.2f}"
     
-    # Temporal envelope analysis: chirps should have energy concentrated early (staccato)
+    # Temporal envelope analysis: use best_chunks (the segment we're classifying)
     chunk_rms_values = []
-    for chunk in event_chunks:
+    for chunk in best_chunks:
         samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
         if len(samples) > 0:
             rms = float(np.sqrt(np.mean(samples ** 2)))
@@ -602,8 +763,14 @@ def classify_event_is_chirp(
             energy_concentration_score = energy_concentration
             
             # Reject if energy is too evenly distributed (sustained sound like door)
-            if energy_concentration < temp_cfg["energy_concentration_threshold"]:
-                return False, None, None, f"energy_too_spread_{energy_concentration:.2f}"
+            # But be more lenient for very short segments (2-3 chunks) where this metric is less meaningful
+            energy_threshold = temp_cfg["energy_concentration_threshold"]
+            if len(chunk_rms_values) <= 3:
+                # For very short segments, relax the threshold slightly
+                energy_threshold = max(0.3, energy_threshold - 0.2)
+            
+            if energy_concentration < energy_threshold:
+                return False, best_similarity, None, f"energy_too_spread_{energy_concentration:.2f}"
         
         # Calculate attack/decay ratio
         attack_decay_ratio = compute_attack_decay_ratio(chunk_rms_values)

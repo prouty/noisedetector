@@ -113,7 +113,8 @@ python3 noise_detector.py sample       # Live sample
 All commands use `.env` configuration automatically.
 
 **Data & Reports:**
-- `make pull` - Pull events.csv and clips from Pi
+- `make pull` - Pull events.csv and all clips from Pi
+- `make pull-chirps` - Pull only clips identified as chirps from Pi
 - `make report` - Generate chirp report
 - `make workflow` - Pull + report
 
@@ -127,6 +128,13 @@ All commands use `.env` configuration automatically.
 - `make restart` - Restart service on Pi
 - `make status` - Check service status
 - `make logs` - View live logs
+
+**Audio Calibration:**
+- `make audio-check` - Validate audio capture levels on Pi (checks for clipping, DC offset, noise floor)
+
+**Quick Status:**
+- `make chirps` - Quick check for detected chirps in events.csv
+- `make chirps-recent` - Show chirps from last 24 hours
 
 **Development:**
 - `make init` - Create virtual environment
@@ -306,6 +314,13 @@ Baseline history is stored in `baseline.json` as an array, allowing you to track
   python3 baseline.py show [--config config.json]
   python3 baseline.py analyze [--config config.json]
   python3 baseline.py validate [--config config.json]
+  ```
+
+- **`audio_analysis.py`**: Audio quality analysis and calibration
+  ```bash
+  python3 audio_analysis.py validate-levels [--config config.json] [--duration 5.0]
+  python3 audio_analysis.py analyze --clip clips/clip_*.wav [--config config.json]
+  python3 audio_analysis.py check-dc --clip clips/clip_*.wav
   ```
 
 ## Troubleshooting

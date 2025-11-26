@@ -14,7 +14,9 @@ def get_default_config() -> Dict[str, Any]:
             "sample_rate": 16000,
             "channels": 1,
             "sample_format": "S16_LE",
-            "chunk_duration": 0.5
+            "chunk_duration": 0.5,
+            "dc_offset_removal": True,
+            "high_pass_filter_hz": 20
         },
         "recording": {
             "output_dir": "clips",

@@ -4,7 +4,9 @@
     "sample_rate": 16000,
     "channels": 1,
     "sample_format": "S16_LE",
-    "chunk_duration": 0.5
+    "chunk_duration": 0.5,
+    "dc_offset_removal": true,
+    "high_pass_filter_hz": 20
   },
   "recording": {
     "output_dir": "clips",

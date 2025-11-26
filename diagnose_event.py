@@ -47,20 +47,29 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
         print("Error: No audio data in clip")
         return
     
-    # Get classification result
+    # Get classification result (this uses sliding window internally)
     is_chirp, similarity, confidence, rejection_reason = monitor.classify_event_is_chirp(
         chunks, fingerprint_info, duration_sec, config
     )
+    
+    # Find the best segment that was used for classification
+    best_chunks, best_similarity, _ = monitor.find_best_chirp_segment(
+        chunks, fingerprint_info, config
+    )
+    
+    # Use best_chunks for analysis if available, otherwise use all chunks
+    analysis_chunks = best_chunks if best_chunks is not None else chunks
+    best_segment_duration = len(analysis_chunks) * audio_cfg["chunk_duration"] if best_chunks else duration_sec
     
     # Calculate detailed features
     chirp_cfg = config["chirp_classification"]
     freq_cfg = chirp_cfg["frequency_filtering"]
     temp_cfg = chirp_cfg["temporal_filtering"]
     
-    # Compute spectrum
+    # Compute spectrum from the best segment (what was actually used for classification)
     if fingerprint_info:
         event_spec = monitor.compute_event_spectrum_from_chunks(
-            chunks, fingerprint_info["sample_rate"], fingerprint_info["fft_size"]
+            analysis_chunks, fingerprint_info["sample_rate"], fingerprint_info["fft_size"]
         )
         
         if event_spec is not None:
@@ -84,9 +93,9 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
         event_spec = None
         low_freq_ratio = high_freq_ratio = spectral_centroid = 0
     
-    # Compute temporal features
+    # Compute temporal features from the best segment
     chunk_rms_values = []
-    for chunk in chunks:
+    for chunk in analysis_chunks:
         chunk_samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / monitor.INT16_FULL_SCALE
         if len(chunk_samples) > 0:
             rms = float(np.sqrt(np.mean(chunk_samples ** 2)))
@@ -108,17 +117,23 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
     print(f"EVENT DIAGNOSIS: {clip_path.name}")
     print("=" * 60)
     print()
-    print(f"Duration: {duration_sec:.2f} seconds")
+    print(f"Full Event Duration: {duration_sec:.2f} seconds")
+    if best_chunks is not None and len(best_chunks) < len(chunks):
+        print(f"Best Segment Duration: {best_segment_duration:.2f} seconds ({len(best_chunks)}/{len(chunks)} chunks)")
+        print(f"  (Using sliding window - focusing on best matching segment)")
     print(f"Classification: {'CHIRP' if is_chirp else 'NOT CHIRP'}")
     print()
     
     if fingerprint_info:
         print("Spectral Analysis:")
-        print(f"  Similarity to fingerprint: {similarity:.3f} (threshold: {chirp_cfg['similarity_threshold']:.3f})")
-        if similarity < chirp_cfg['similarity_threshold']:
-            print(f"  ❌ FAILED: Similarity too low")
+        if similarity is not None:
+            print(f"  Similarity to fingerprint: {similarity:.3f} (threshold: {chirp_cfg['similarity_threshold']:.3f})")
+            if similarity < chirp_cfg['similarity_threshold']:
+                print(f"  ❌ FAILED: Similarity too low")
+            else:
+                print(f"  ✓ PASSED: Similarity above threshold")
         else:
-            print(f"  ✓ PASSED: Similarity above threshold")
+            print(f"  Similarity: N/A (classification failed before similarity check)")
         print()
         
         if event_spec is not None:
@@ -139,8 +154,8 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
             print()
     
     print("Temporal Analysis:")
-    print(f"  Duration: {duration_sec:.2f}s (max: {temp_cfg['max_duration_sec']:.2f}s)")
-    if duration_sec > temp_cfg['max_duration_sec']:
+    print(f"  Best Segment Duration: {best_segment_duration:.2f}s (max: {temp_cfg['max_duration_sec']:.2f}s)")
+    if best_segment_duration > temp_cfg['max_duration_sec']:
         print(f"  ❌ FAILED: Duration too long (sustained sound)")
     else:
         print(f"  ✓ PASSED: Duration acceptable")

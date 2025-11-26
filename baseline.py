@@ -5,7 +5,6 @@ import sys
 from pathlib import Path
 from typing import Dict, List, Optional
 import numpy as np
-
 import config_loader
 import monitor
 
@@ -68,11 +67,22 @@ def set_baseline(duration_sec=10, config_path: Optional[Path] = None):
             if len(samples) == 0:
                 continue
 
+            # Fix: If all samples are zeros, skip this chunk (likely silent/invalid)
+            if np.all(samples == 0):
+                continue
+
             peak = float(np.max(np.abs(samples)))
             rms = float(np.sqrt(np.mean(samples ** 2)))
 
-            peak_vals.append(monitor.dbfs(peak))
-            rms_vals.append(monitor.dbfs(rms))
+            peak_db = monitor.dbfs(peak)
+            rms_db = monitor.dbfs(rms)
+
+            # Don't allow NaN or inf values into arrays
+            if not (np.isfinite(peak_db) and np.isfinite(rms_db)):
+                continue
+
+            peak_vals.append(peak_db)
+            rms_vals.append(rms_db)
 
             if time.time() - start >= duration_sec:
                 break
@@ -86,11 +96,11 @@ def set_baseline(duration_sec=10, config_path: Optional[Path] = None):
 
     baseline_data = {
         "timestamp": datetime.datetime.now().isoformat(),
-        "rms_db": float(np.mean(rms_vals)),
-        "peak_db": float(np.mean(peak_vals)),
-        "rms_std": float(np.std(rms_vals)),
-        "rms_min": float(np.min(rms_vals)),
-        "rms_max": float(np.max(rms_vals)),
+        "rms_db": float(np.mean(rms_vals)) if rms_vals else float('nan'),
+        "peak_db": float(np.mean(peak_vals)) if peak_vals else float('nan'),
+        "rms_std": float(np.std(rms_vals)) if rms_vals else float('nan'),
+        "rms_min": float(np.min(rms_vals)) if rms_vals else float('nan'),
+        "rms_max": float(np.max(rms_vals)) if rms_vals else float('nan'),
     }
 
     # Load existing history and append
@@ -118,10 +128,13 @@ def show_baseline(config_path: Optional[Path] = None):
     latest = history[-1]
     print("\nLast Baseline:")
     print(f"  Timestamp: {latest.get('timestamp', 'N/A')}")
-    print(f"  RMS: {latest['rms_db']:.1f} dBFS")
-    if 'rms_std' in latest:
+    # Defensively check for missing or not-a-number values:
+    rms_db = latest.get('rms_db')
+    print(f"  RMS: {rms_db:.1f} dBFS" if isinstance(rms_db, (int, float)) and np.isfinite(rms_db) else "  RMS: N/A")
+    if 'rms_std' in latest and isinstance(latest['rms_std'], (int, float)) and np.isfinite(latest['rms_std']):
         print(f"  RMS Std Dev: {latest['rms_std']:.2f} dBFS")
-    print(f"  Peak: {latest.get('peak_db', 'N/A')} dBFS")
+    peak_db = latest.get('peak_db')
+    print(f"  Peak: {peak_db:.1f} dBFS" if isinstance(peak_db, (int, float)) and np.isfinite(peak_db) else f"  Peak: {peak_db if peak_db is not None else 'N/A'} dBFS")
     print()
 
 
@@ -138,7 +151,13 @@ def analyze_baseline(config_path: Optional[Path] = None):
     print(f"\nBaseline History ({len(history)} entries):")
     print()
     
-    rms_values = [b["rms_db"] for b in history]
+    # Only include valid (finite) values in the statistics
+    rms_values = [b["rms_db"] for b in history if "rms_db" in b and np.isfinite(b["rms_db"])]
+    if not rms_values:
+        print("No valid RMS values found in baseline history.")
+        print()
+        return
+
     print(f"RMS Statistics:")
     print(f"  Mean: {np.mean(rms_values):.1f} dBFS")
     print(f"  Std Dev: {np.std(rms_values):.2f} dBFS")
@@ -148,7 +167,7 @@ def analyze_baseline(config_path: Optional[Path] = None):
     print()
     
     # Check for stability
-    if len(history) > 1:
+    if len(rms_values) > 1:
         recent_std = np.std(rms_values[-10:]) if len(rms_values) >= 10 else np.std(rms_values)
         if recent_std > 3.0:
             print("  WARNING: Baseline appears unstable (high variance)")
@@ -172,18 +191,23 @@ def validate_baseline(config_path: Optional[Path] = None) -> bool:
     latest = history[-1]
     
     # Check if baseline has reasonable statistics
-    if "rms_std" in latest:
+    if "rms_std" in latest and isinstance(latest["rms_std"], (float, int)) and np.isfinite(latest["rms_std"]):
         if latest["rms_std"] > 5.0:
             print(f"Baseline has high variance (std={latest['rms_std']:.2f}) - may not be reliable")
             return False
     
     # Check if baseline is too quiet or too loud (might indicate measurement error)
-    if latest["rms_db"] < -80:
-        print(f"Baseline very quiet ({latest['rms_db']:.1f} dBFS) - may indicate measurement issue")
+    rms_db = latest.get("rms_db")
+    if rms_db is None or not np.isfinite(rms_db):
+        print("Baseline RMS missing or invalid")
+        return False
+
+    if rms_db < -80:
+        print(f"Baseline very quiet ({rms_db:.1f} dBFS) - may indicate measurement issue")
         return False
     
-    if latest["rms_db"] > -20:
-        print(f"Baseline very loud ({latest['rms_db']:.1f} dBFS) - may indicate measurement issue")
+    if rms_db > -20:
+        print(f"Baseline very loud ({rms_db:.1f} dBFS) - may indicate measurement issue")
         return False
     
     print("Baseline appears valid")
