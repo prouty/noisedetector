@@ -28,6 +28,10 @@ rsync -avz \
 	--exclude 'recordings' \
 	--exclude 'baseline.json' \
 	--exclude 'events.csv' \
+	--exclude 'chirp_report*.md' \
+	--exclude 'validation_results.csv' \
+	--exclude 'clip_analysis.csv' \
+	--exclude 'tuning_results.csv' \
 	--exclude '__pycache__' \
 	--exclude 'venv' \
 	--exclude '.git' \

@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 
 import sys
+import argparse
+from pathlib import Path
 import baseline
 import sampler
 import monitor
@@ -15,21 +17,33 @@ Noise Detector – Main Menu
 """
 
 def main():
+    parser = argparse.ArgumentParser(description="Noise Detector - Audio monitoring and chirp classification")
+    parser.add_argument("mode", nargs="?", help="Mode: monitor, baseline, sample, show-baseline")
+    parser.add_argument("--config", type=Path, help="Path to config.json file")
+    
+    args = parser.parse_args()
+    
     # If an argument is given, skip the menu and run directly
-    if len(sys.argv) > 1:
-        mode = sys.argv[1].lower()
+    if args.mode:
+        mode = args.mode.lower()
 
         if mode == "monitor":
-            monitor.run_monitor()
+            monitor.run_monitor(args.config)
             return
         elif mode == "baseline":
-            baseline.set_baseline()
+            baseline.set_baseline(config_path=args.config)
             return
         elif mode == "sample":
             sampler.live_sample()
             return
         elif mode == "show-baseline":
-            baseline.show_baseline()
+            baseline.show_baseline(args.config)
+            return
+        elif mode == "baseline-analyze":
+            baseline.analyze_baseline(args.config)
+            return
+        elif mode == "baseline-validate":
+            baseline.validate_baseline(args.config)
             return
         else:
             print(f"Unknown mode: {mode}")
