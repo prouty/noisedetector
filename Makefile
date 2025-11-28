@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull train deploy restart report workflow
+.PHONY: pull train deploy deploy-restart restart reload stop start report workflow
 
 pull:
 	@echo "==> Pulling events.csv and clips from Pi..."
@@ -39,10 +39,19 @@ train:
 deploy:
 	@echo "==> Deploying chirp_fingerprint.json to Pi..."
 	rsync -avz $(LOCAL_DIR)/chirp_fingerprint.json $(PI_HOST):$(PI_DIR)/
+	@echo "==> Note: Service restart required for new fingerprint to take effect"
+	@echo "==> Run 'make restart' to restart the service"
+
+deploy-restart: deploy restart
+	@echo "==> Deployed fingerprint and restarted service"
 
 reload:
 	@echo "==> Reloading noise-monitor service on Pi..."
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl daemon-reload'
+
+restart:
+	@echo "==> Restarting noise-monitor service on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl restart noise-monitor'
 
 stop:
 	@echo "==> Stopping noise-monitor service on Pi..."
