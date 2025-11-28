@@ -35,55 +35,212 @@ def get_config() -> Dict[str, Any]:
     return _config
 
 
-def start_arecord(config: Dict[str, Any]):
-    """Start an arecord subprocess that outputs raw PCM to stdout."""
+def start_arecord(config: Dict[str, Any]) -> subprocess.Popen:
+    """
+    Start an arecord subprocess that outputs raw PCM to stdout.
+    
+    This function launches arecord (ALSA recording utility) as a subprocess.
+    The process runs continuously, outputting raw PCM audio data to stdout.
+    
+    Args:
+        config: Configuration dictionary containing audio settings
+        
+    Returns:
+        Popen process object with stdout/stderr pipes
+        
+    Raises:
+        FileNotFoundError: If arecord command is not found
+        ValueError: If audio device configuration is invalid
+        
+    Common failures:
+        - "Device or resource busy": Another process is using the audio device
+          Solution: Stop noise-monitor service or other audio processes
+        - "No such file or directory": Audio device doesn't exist
+          Solution: Check device name with 'arecord -l', update config.json
+        - "Permission denied": User doesn't have access to audio device
+          Solution: Add user to 'audio' group: sudo usermod -a -G audio $USER
+    """
     audio = config["audio"]
+    device = audio["device"]
+    
+    # Validate device string format (basic check)
+    if not device or not isinstance(device, str):
+        raise ValueError(f"Invalid audio device configuration: {device}. Expected string like 'plughw:CARD=Device,DEV=0'")
+    
     cmd = [
         "arecord",
-        "-D", audio["device"],
+        "-D", device,
         "-f", audio["sample_format"],
         "-r", str(audio["sample_rate"]),
         "-c", str(audio["channels"]),
         "-q",           # quiet (no ALSA banner)
         "-t", "raw"     # raw PCM data to stdout
     ]
-    return subprocess.Popen(
-        cmd,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE
-    )
+    
+    try:
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE
+        )
+    except FileNotFoundError:
+        raise FileNotFoundError(
+            "arecord command not found. Install alsa-utils: sudo apt-get install alsa-utils"
+        )
+    except Exception as e:
+        raise RuntimeError(
+            f"Failed to start arecord process. Command: {' '.join(cmd)}. Error: {e}"
+        )
+    
+    # Give process a moment to initialize and check if it failed immediately
+    import time
+    time.sleep(0.1)
+    if proc.poll() is not None:
+        # Process exited immediately - read stderr for error message
+        stderr_msg = ""
+        if proc.stderr:
+            stderr_msg = proc.stderr.read().decode(errors="ignore").strip()
+        
+        error_hints = {
+            "Device or resource busy": "Audio device is in use. Stop noise-monitor service: 'make stop'",
+            "No such file or directory": f"Audio device '{device}' not found. Check with 'arecord -l'",
+            "Permission denied": "No permission to access audio device. Add user to audio group: 'sudo usermod -a -G audio $USER'",
+            "Invalid argument": f"Invalid audio device or format. Device: {device}, Format: {audio['sample_format']}"
+        }
+        
+        hint = ""
+        for key, msg in error_hints.items():
+            if key in stderr_msg:
+                hint = f" Hint: {msg}"
+                break
+        
+        raise RuntimeError(
+            f"arecord failed to start. Device: {device}. Error: {stderr_msg}.{hint}"
+        )
+    
+    return proc
 
 
-def open_new_wav_segment(start_time: datetime.datetime, config: Dict[str, Any]):
-    """Open a new WAV file for a recording segment."""
+def open_new_wav_segment(start_time: datetime.datetime, config: Dict[str, Any]) -> Tuple[wave.Wave_write, Path]:
+    """
+    Open a new WAV file for a recording segment.
+    
+    Segments are 5-minute continuous recordings that serve as backup/archive.
+    Event clips are extracted from these segments.
+    
+    Args:
+        start_time: Timestamp for segment start (used in filename)
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (wave file object, file path)
+        
+    Raises:
+        OSError: If directory can't be created or file can't be opened
+        wave.Error: If WAV format is invalid
+        
+    File naming:
+        Format: YYYY-MM-DD_HH-MM-SS.wav
+        Location: output_dir from config (default: clips/)
+    """
     output_dir = Path(config["recording"]["output_dir"])
-    output_dir.mkdir(parents=True, exist_ok=True)
+    
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except PermissionError:
+        raise PermissionError(
+            f"Cannot create output directory {output_dir}. Check permissions."
+        )
+    except Exception as e:
+        raise OSError(f"Failed to create output directory {output_dir}: {e}")
+    
     fname = start_time.strftime("%Y-%m-%d_%H-%M-%S") + ".wav"
     fpath = output_dir / fname
 
     audio = config["audio"]
-    wf = wave.open(str(fpath), "wb")
-    wf.setnchannels(audio["channels"])
-    wf.setsampwidth(BYTES_PER_SAMPLE)   # 2 bytes for S16_LE
-    wf.setframerate(audio["sample_rate"])
+    
+    try:
+        wf = wave.open(str(fpath), "wb")
+        wf.setnchannels(audio["channels"])
+        wf.setsampwidth(BYTES_PER_SAMPLE)   # 2 bytes for S16_LE
+        wf.setframerate(audio["sample_rate"])
+    except OSError as e:
+        raise OSError(
+            f"Failed to open segment file {fpath}: {e}. "
+            f"Check disk space (df -h) and permissions."
+        )
+    except wave.Error as e:
+        raise wave.Error(f"Invalid WAV parameters for {fpath}: {e}")
 
     print(f"[INFO] Started new segment: {fpath}")
     return wf, fpath
 
 
-def load_initial_baseline(config: Dict[str, Any]):
-    """Try to load baseline.rms_db from baseline.json, else return None."""
+def load_initial_baseline(config: Dict[str, Any]) -> Optional[float]:
+    """
+    Load initial baseline from baseline.json file.
+    
+    The baseline file can contain either:
+    1. Single baseline object: {"rms_db": -45.2, "timestamp": "..."}
+    2. History array: [{"rms_db": -45.2, ...}, ...] (uses last entry)
+    
+    If no baseline file exists, returns None and system uses rolling baseline only.
+    Rolling baseline is calculated from recent audio chunks (20th percentile).
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Baseline RMS in dBFS (float) or None if file doesn't exist or is invalid
+        
+    Common issues:
+        - File not found: Normal - system will use rolling baseline
+        - Invalid JSON: File corrupted, regenerate with 'python3 baseline.py set'
+        - Missing rms_db: Old format, regenerate baseline
+    """
     baseline_file = Path(config["event_detection"]["baseline_file"])
-    if baseline_file.exists():
-        try:
-            data = json.load(baseline_file.open())
-            rms_db = float(data.get("rms_db"))
-            print(f"[INFO] Loaded baseline RMS from {baseline_file}: {rms_db:.1f} dBFS")
-            return rms_db
-        except Exception as e:
-            print(f"[WARN] Failed to load baseline.json: {e}")
-    print("[INFO] No baseline.json found; using rolling baseline only.")
-    return None
+    
+    if not baseline_file.exists():
+        print("[INFO] No baseline.json found; using rolling baseline only.")
+        print("  To set initial baseline: python3 baseline.py set")
+        return None
+    
+    try:
+        with baseline_file.open() as f:
+            data = json.load(f)
+    except json.JSONDecodeError as e:
+        print(f"[WARN] Invalid JSON in baseline file {baseline_file}: {e}")
+        print("  File may be corrupted. Regenerate with: python3 baseline.py set")
+        return None
+    except Exception as e:
+        print(f"[WARN] Failed to read baseline file {baseline_file}: {e}")
+        return None
+    
+    # Handle both single baseline and history array formats
+    if isinstance(data, list):
+        if len(data) == 0:
+            print("[WARN] Baseline history is empty")
+            return None
+        latest = data[-1]  # Use most recent baseline
+    else:
+        latest = data
+    
+    try:
+        rms_db = float(latest.get("rms_db"))
+        
+        # Validate reasonable range
+        if not (-100 < rms_db < 0):
+            print(f"[WARN] Baseline RMS value seems unusual: {rms_db:.1f} dBFS")
+            print("  Expected range: -100 to 0 dBFS")
+            print("  Regenerate with: python3 baseline.py set")
+        
+        print(f"[INFO] Loaded baseline RMS from {baseline_file}: {rms_db:.1f} dBFS")
+        return rms_db
+    
+    except (ValueError, TypeError, KeyError) as e:
+        print(f"[WARN] Invalid baseline data in {baseline_file}: {e}")
+        print("  Missing or invalid 'rms_db' field. Regenerate with: python3 baseline.py set")
+        return None
 
 
 def ensure_events_header(config: Dict[str, Any]):
@@ -110,29 +267,75 @@ def ensure_events_header(config: Dict[str, Any]):
             ])
 
 
-def log_event(event, config: Dict[str, Any]):
-    """Append a single event dict to EVENTS_FILE."""
+def log_event(event: Dict[str, Any], config: Dict[str, Any]):
+    """
+    Append a single event to the events CSV file.
+    
+    This function writes event data to events.csv in a thread-safe manner
+    (single process, append-only). The CSV format allows easy analysis with
+    spreadsheet software or pandas.
+    
+    Args:
+        event: Dictionary containing event data (see required fields below)
+        config: Configuration dictionary
+        
+    Required event fields:
+        - start_timestamp: ISO format timestamp string
+        - end_timestamp: ISO format timestamp string
+        - duration_sec: Event duration in seconds (float)
+        - max_peak_db: Maximum peak level in dBFS (float)
+        - max_rms_db: Maximum RMS level in dBFS (float)
+        - baseline_rms_db: Baseline level at event start (float or None)
+        - segment_file: Path to segment WAV file (string)
+        - segment_offset_sec: Offset within segment in seconds (float)
+        - clip_file: Path to event clip (string, optional)
+        - is_chirp: Boolean classification result
+        - chirp_similarity: Similarity score 0-1 (float or None)
+        - confidence: Confidence score 0-1 (float or None)
+        - rejection_reason: Why non-chirp was rejected (string, optional)
+        - reviewed: User review status (string, optional)
+        
+    CSV columns (in order):
+        start_timestamp, end_timestamp, duration_sec, max_peak_db, max_rms_db,
+        baseline_rms_db, segment_file, segment_offset_sec, clip_file, is_chirp,
+        chirp_similarity, confidence, rejection_reason, reviewed
+        
+    Raises:
+        PermissionError: If events file is not writable
+        OSError: If directory doesn't exist and can't be created
+    """
     ensure_events_header(config)
     events_file = Path(config["event_detection"]["events_file"])
-    with events_file.open("a", newline="") as f:
-        writer = csv.writer(f)
-        writer.writerow([
-            event["start_timestamp"],
-            event["end_timestamp"],
-            f"{event['duration_sec']:.2f}",
-            f"{event['max_peak_db']:.2f}",
-            f"{event['max_rms_db']:.2f}",
-            f"{event['baseline_rms_db']:.2f}"
-                if event["baseline_rms_db"] is not None else "",
-            str(event["segment_file"]),
-            f"{event['segment_offset_sec']:.2f}",
-            str(event.get("clip_file", "")),
-            "TRUE" if event.get("is_chirp") else "FALSE",
-            f"{event.get('chirp_similarity', 0.0):.3f}" if event.get("chirp_similarity") is not None else "",
-            f"{event.get('confidence', 0.0):.3f}" if event.get("confidence") is not None else "",
-            event.get("rejection_reason", ""),
-            event.get("reviewed", ""),  # User can fill this in manually
-        ])
+    
+    try:
+        with events_file.open("a", newline="") as f:
+            writer = csv.writer(f)
+            writer.writerow([
+                event["start_timestamp"],
+                event["end_timestamp"],
+                f"{event['duration_sec']:.2f}",
+                f"{event['max_peak_db']:.2f}",
+                f"{event['max_rms_db']:.2f}",
+                f"{event['baseline_rms_db']:.2f}"
+                    if event["baseline_rms_db"] is not None else "",
+                str(event["segment_file"]),
+                f"{event['segment_offset_sec']:.2f}",
+                str(event.get("clip_file", "")),
+                "TRUE" if event.get("is_chirp") else "FALSE",
+                f"{event.get('chirp_similarity', 0.0):.3f}" if event.get("chirp_similarity") is not None else "",
+                f"{event.get('confidence', 0.0):.3f}" if event.get("confidence") is not None else "",
+                event.get("rejection_reason", ""),
+                event.get("reviewed", ""),  # User can fill this in manually
+            ])
+    except PermissionError:
+        print(f"[ERROR] No permission to write events file: {events_file}")
+        print("  Check file permissions and directory access")
+        raise
+    except OSError as e:
+        print(f"[ERROR] Failed to write events file {events_file}: {e}")
+        raise
+    
+    # Print summary to console for real-time monitoring
     chirp_status = "CHIRP" if event.get("is_chirp") else "noise"
     conf_str = f", confidence={event.get('confidence', 0.0):.2f}" if event.get("confidence") is not None else ""
     print(
@@ -160,10 +363,51 @@ def save_event_clip(event_start_time: datetime.datetime, event_chunks, config: D
     return fpath
 
 
-def run_monitor(config_path: Optional[Path] = None):
-    """Run the audio monitor with optional config file."""
+def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
+    """
+    Run the audio monitor - main event loop.
+    
+    This is the core monitoring function that:
+    1. Captures continuous audio from arecord
+    2. Detects events above baseline threshold
+    3. Classifies events as chirps or noise
+    4. Saves clips and logs events to CSV
+    
+    Args:
+        config_path: Optional path to config.json (defaults to ./config.json)
+        debug: If True, enable verbose debug output
+        
+    State machine:
+        IDLE → (RMS > threshold) → IN_EVENT → (RMS <= threshold) → IDLE
+    
+    Critical state variables (for debugging):
+        - baseline_rms_db: Current baseline level (None if not initialized)
+        - baseline_window: Rolling window of RMS values for baseline calculation
+        - in_event: Boolean flag indicating if we're currently in an event
+        - event_chunks: List of raw audio chunks for current event
+        - event_actual_start_idx: Index where real event starts (after pre-roll)
+        - pre_roll_buffer: Audio buffer before event (for context in clips)
+    
+    Error recovery:
+        - arecord failures: Process is monitored, errors logged, system exits gracefully
+        - File I/O errors: Caught in try/except, logged, system continues
+        - Invalid audio data: Skipped chunks, baseline calculation handles missing data
+    
+    Performance notes:
+        - Processes 0.5s chunks (2 Hz update rate)
+        - Baseline window: 120 chunks (~60s history)
+        - FFT operations only during event classification (not every chunk)
+    """
     global _config
-    _config = config_loader.load_config(config_path)
+    
+    try:
+        _config = config_loader.load_config(config_path)
+    except Exception as e:
+        print(f"[ERROR] Failed to load configuration: {e}")
+        print("  Check that config.json exists and is valid JSON")
+        print("  Or create from config.example.json")
+        raise
+    
     config = _config
     
     # Calculate derived constants from config
@@ -181,19 +425,47 @@ def run_monitor(config_path: Optional[Path] = None):
     pre_roll_chunks = int(event_clips["pre_roll_sec"] / chunk_duration)
     baseline_window_chunks = event_detection["baseline_window_chunks"]
     
-    print("Starting audio monitor + recorder (arecord-based)...")
-    print(f"Device: {audio['device']}")
-    print(f"Output directory: {Path(recording['output_dir']).resolve()}")
-    print(f"Events log: {Path(event_detection['events_file']).resolve()}")
-    print(f"Clips directory: {Path(event_clips['clips_dir']).resolve()}")
-    print("Press Ctrl+C to stop.\n")
-
+    # Load fingerprint before printing status (needed for status message)
     fingerprint_info = load_chirp_fingerprint(config)
+    
+    print("=" * 60)
+    print("NOISE DETECTOR - Starting Monitor")
+    print("=" * 60)
+    print(f"Audio Device: {audio['device']}")
+    print(f"Sample Rate: {audio['sample_rate']} Hz")
+    print(f"Chunk Duration: {audio['chunk_duration']}s")
+    print(f"Output Directory: {Path(recording['output_dir']).resolve()}")
+    print(f"Events Log: {Path(event_detection['events_file']).resolve()}")
+    print(f"Clips Directory: {Path(event_clips['clips_dir']).resolve()}")
+    print(f"Baseline Threshold: +{event_detection['threshold_above_baseline_db']:.1f} dB")
+    print(f"Min Event Duration: {event_detection['min_event_duration_sec']:.1f}s")
+    if fingerprint_info:
+        print(f"Chirp Classification: ENABLED (threshold: {config['chirp_classification']['similarity_threshold']:.2f})")
+    else:
+        print("Chirp Classification: DISABLED (no fingerprint)")
+    print("=" * 60)
+    print("Press Ctrl+C to stop.\n")
+    if fingerprint_info is None:
+        print("[WARN] Chirp classification disabled - no fingerprint file found")
+        print(f"  Expected: {config['chirp_classification']['fingerprint_file']}")
+        print("  Run 'make train' to create fingerprint from training samples")
 
-    proc = start_arecord(config)
+    try:
+        proc = start_arecord(config)
+    except (FileNotFoundError, RuntimeError, ValueError) as e:
+        print(f"[ERROR] Failed to start audio capture: {e}")
+        print("\nTroubleshooting:")
+        print("  1. Check audio device: arecord -l")
+        print("  2. Verify device in config.json matches hardware")
+        print("  3. Check permissions: groups (should include 'audio')")
+        print("  4. Stop other processes using audio: pkill arecord")
+        raise
 
     if proc.stdout is None:
-        print("[ERROR] Failed to open arecord stdout.")
+        print("[ERROR] Failed to open arecord stdout pipe.")
+        print("  This should not happen - arecord process started but stdout is None")
+        print("  Possible subprocess.Popen issue")
+        proc.terminate()
         return
 
     wav_file = None
@@ -229,11 +501,34 @@ def run_monitor(config_path: Optional[Path] = None):
 
             if not data or len(data) < chunk_bytes:
                 # arecord stopped or stream interrupted
+                # This can happen if:
+                # - Device disconnected (USB mic unplugged)
+                # - arecord process crashed
+                # - System audio subsystem restarted
+                # - Permission revoked
+                error_msg = ""
                 if proc.stderr:
                     err = proc.stderr.read().decode(errors="ignore").strip()
                     if err:
-                        print(f"\n[arecord stderr] {err}")
-                print("\n[INFO] arecord stream ended.")
+                        error_msg = f"arecord stderr: {err}"
+                
+                exit_code = proc.poll()
+                if exit_code is not None:
+                    print(f"\n[ERROR] arecord process exited with code {exit_code}")
+                    if error_msg:
+                        print(f"  {error_msg}")
+                    print("  Possible causes:")
+                    print("    - Audio device disconnected")
+                    print("    - Device permissions changed")
+                    print("    - System audio subsystem issue")
+                    print("    - Hardware failure")
+                else:
+                    print(f"\n[WARN] arecord stream ended unexpectedly (process still running)")
+                    if error_msg:
+                        print(f"  {error_msg}")
+                    print("  This may indicate a partial read or buffer issue")
+                
+                print("\n[INFO] Stopping monitor due to audio stream interruption")
                 break
 
             # Convert raw bytes to numpy array of int16
@@ -334,35 +629,60 @@ def run_monitor(config_path: Optional[Path] = None):
                         rejection_reason = None
 
                         # For chirp classification, use only actual event chunks (exclude pre-roll)
-                        # Note: The ending chunk (below threshold) is never appended to event_chunks,
+                        # CRITICAL: The ending chunk (below threshold) is never appended to event_chunks,
                         # so the last chunk in event_chunks is the last valid event chunk.
+                        # We don't need to exclude anything - event_chunks already contains only valid event audio.
                         if event_chunks is not None and event_actual_start_idx is not None:
                             # Use all chunks from actual event start to the end
-                            # (the ending chunk below threshold was never added, so no need to exclude it)
+                            # event_actual_start_idx marks where the real event begins (after pre-roll)
                             actual_event_chunks = event_chunks[event_actual_start_idx:]
+                            
                             if actual_event_chunks:
-                                is_chirp, similarity, confidence, rejection_reason = classify_event_is_chirp(
-                                    actual_event_chunks, fingerprint_info, duration_sec, config
-                                )
+                                try:
+                                    is_chirp, similarity, confidence, rejection_reason = classify_event_is_chirp(
+                                        actual_event_chunks, fingerprint_info, duration_sec, config
+                                    )
+                                except Exception as e:
+                                    # Classification failed - log error but continue
+                                    # This prevents classification bugs from stopping event logging
+                                    print(f"[ERROR] Classification failed for event {event_start_time}: {e}")
+                                    if debug:
+                                        import traceback
+                                        traceback.print_exc()
+                                    # Continue with is_chirp=False (default)
 
                         # Compute offset within segment
+                        # This tells us where in the 5-minute segment file the event occurred
                         offset_sec = (event_start_offset_samples or 0) / float(sample_rate)
+                        
+                        # Build event dictionary for logging
+                        # All fields must be present for CSV consistency
                         event = {
                             "start_timestamp": event_start_time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "end_timestamp": event_end_time.strftime("%Y-%m-%dT%H:%M:%S"),
                             "duration_sec": duration_sec,
-                            "max_peak_db": event_max_peak_db,
-                            "max_rms_db": event_max_rms_db,
-                            "baseline_rms_db": event_baseline_at_start,
-                            "segment_file": event_segment_file,
+                            "max_peak_db": event_max_peak_db or 0.0,
+                            "max_rms_db": event_max_rms_db or 0.0,
+                            "baseline_rms_db": event_baseline_at_start,  # Can be None
+                            "segment_file": event_segment_file or "",
                             "segment_offset_sec": offset_sec,
                             "is_chirp": is_chirp,
-                            "chirp_similarity": similarity,
-                            "confidence": confidence,
-                            "rejection_reason": rejection_reason,
-                            "clip_file": clip_path,
+                            "chirp_similarity": similarity,  # Can be None
+                            "confidence": confidence,  # Can be None
+                            "rejection_reason": rejection_reason or "",
+                            "clip_file": str(clip_path) if clip_path else "",
                         }
-                        log_event(event, config)
+                        
+                        try:
+                            log_event(event, config)
+                        except (PermissionError, OSError) as e:
+                            # Event logging failed - this is critical
+                            # Print error but don't crash - we want to keep monitoring
+                            print(f"[ERROR] Failed to log event to CSV: {e}")
+                            print(f"  Event data: {event_start_time} to {event_end_time}, duration {duration_sec:.2f}s")
+                            if debug:
+                                import traceback
+                                traceback.print_exc()
 
                     # Reset event/clip state
                     in_event = False
@@ -380,14 +700,27 @@ def run_monitor(config_path: Optional[Path] = None):
                     if event_chunks is not None:
                         event_chunks.append(data)
 
-            # Print live metrics (for your sanity while testing)
+            # Print live metrics (for real-time monitoring)
+            # Format: timestamp | peak | rms | baseline | threshold | status
             baseline_str = f"{baseline_rms_db:6.1f}" if baseline_rms_db is not None else "  N/A "
+            threshold_str = f"{threshold_db:6.1f}" if baseline_rms_db is not None else "  N/A "
+            status = "EVENT" if in_event else "IDLE"
+            
             print(
                 f"{timestamp_str} | peak: {peak_db:6.1f} dBFS | "
                 f"rms: {rms_db:6.1f} dBFS | "
-                f"baseline: {baseline_str} dBFS",
+                f"baseline: {baseline_str} dBFS | "
+                f"threshold: {threshold_str} dBFS | "
+                f"{status}",
                 flush=True
             )
+            
+            # Debug mode: additional verbose output
+            if debug and in_event:
+                if event_chunks:
+                    chunk_count = len(event_chunks)
+                    actual_chunks = chunk_count - (event_actual_start_idx or 0)
+                    print(f"  [DEBUG] Event chunks: {chunk_count} total, {actual_chunks} actual")
 
             # --- Recording part ---
 
@@ -405,21 +738,54 @@ def run_monitor(config_path: Optional[Path] = None):
                 samples_written_in_segment = 0
 
     except KeyboardInterrupt:
-        print("\nStopping monitor (Ctrl+C)...") 
+        print("\n[INFO] Stopping monitor (Ctrl+C received)...")
+    except Exception as e:
+        # Catch-all for unexpected errors - log with full context
+        print(f"\n[ERROR] Unexpected error in monitor loop: {e}")
+        print(f"  Error type: {type(e).__name__}")
+        import traceback
+        if debug:
+            print("  Full traceback:")
+            traceback.print_exc()
+        else:
+            print("  Run with --debug flag for full traceback")
+        raise  # Re-raise so caller knows something went wrong
 
     finally:
         # Clean up WAV file
+        # CRITICAL: Always close WAV file properly or it will be corrupted
         if wav_file is not None:
             try:
                 wav_file.close()
-                print(f"[INFO] Closed segment: {current_path}")
-            except Exception:
-                pass
+                if current_path:
+                    print(f"[INFO] Closed segment: {current_path}")
+            except Exception as e:
+                print(f"[ERROR] Failed to close WAV file {current_path}: {e}")
+                # Don't raise - we're in cleanup, continue with other cleanup
 
         # Clean up arecord process
-        if proc and proc.poll() is None:
-            proc.terminate()
-        print("Monitor stopped.")
+        # CRITICAL: Terminate arecord or it will keep running and block device
+        if proc:
+            if proc.poll() is None:
+                # Process still running - terminate it
+                try:
+                    proc.terminate()
+                    # Give it a moment to terminate gracefully
+                    import time
+                    time.sleep(0.1)
+                    if proc.poll() is None:
+                        # Still running - force kill
+                        proc.kill()
+                except Exception as e:
+                    print(f"[WARN] Error terminating arecord process: {e}")
+            else:
+                # Process already exited - check for errors
+                if proc.returncode != 0 and proc.stderr:
+                    err = proc.stderr.read().decode(errors="ignore").strip()
+                    if err:
+                        print(f"[INFO] arecord exit code {proc.returncode}: {err}")
+        
+        print("[INFO] Monitor stopped and cleaned up.")
 
 def load_chirp_fingerprint(config: Dict[str, Any]):
     fingerprint_file = Path(config["chirp_classification"]["fingerprint_file"])
@@ -446,56 +812,116 @@ def load_chirp_fingerprint(config: Dict[str, Any]):
         return None
 
 
-def compute_event_spectrum_from_chunks(chunks, sample_rate, fft_size):
+def compute_event_spectrum_from_chunks(
+    chunks: List[bytes], 
+    sample_rate: int, 
+    fft_size: int
+) -> Optional[np.ndarray]:
+    """
+    Compute averaged magnitude spectrum from event audio chunks.
+    
+    This function:
+    1. Concatenates all chunks into single audio stream
+    2. Removes DC offset (hardware artifact)
+    3. Applies Hanning window and FFT with 50% overlap
+    4. Averages multiple FFT windows for stability
+    5. Normalizes result (L2 norm) for cosine similarity
+    
+    Args:
+        chunks: List of raw PCM byte chunks (int16 little-endian)
+        sample_rate: Audio sample rate in Hz
+        fft_size: FFT window size (must match fingerprint fft_size)
+        
+    Returns:
+        Normalized magnitude spectrum (1D numpy array) or None if computation fails
+        
+    Frequency resolution:
+        With sample_rate=16000 and fft_size=2048: ~7.8 Hz per bin
+        Bin 0 = DC, Bin 1 = 7.8 Hz, Bin 2 = 15.6 Hz, etc.
+        Nyquist = sample_rate/2 = 8000 Hz (bin 1024)
+    
+    Edge cases handled:
+        - Empty chunks: Returns None
+        - Very short audio: Zero-pads to fft_size
+        - Single window: Ensures at least one FFT is computed
+    """
     if not chunks:
         return None
 
-    raw = b"".join(chunks)
-    samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
-    
-    # Remove DC offset before spectral analysis
-    # DC component can skew frequency analysis, especially on Pi hardware
-    dc_offset = np.mean(samples)
-    samples = samples - dc_offset
+    try:
+        raw = b"".join(chunks)
+        if len(raw) == 0:
+            return None
+        
+        samples = np.frombuffer(raw, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
+        
+        # Remove DC offset before spectral analysis
+        # DC component can skew frequency analysis, especially on Pi hardware
+        # DC appears as energy at 0 Hz, which we don't want in our frequency analysis
+        dc_offset = np.mean(samples)
+        samples = samples - dc_offset
 
-    if samples.shape[0] < fft_size:
-        pad = fft_size - samples.shape[0]
-        samples = np.pad(samples, (0, pad))
+        # Zero-pad if audio is shorter than FFT window
+        # This allows FFT of very short events (though with reduced frequency resolution)
+        if samples.shape[0] < fft_size:
+            pad = fft_size - samples.shape[0]
+            samples = np.pad(samples, (0, pad), mode='constant')
+    except Exception as e:
+        # If we can't process the audio, return None rather than crashing
+        # This can happen with corrupted chunks or invalid data
+        return None
 
-    hop = fft_size // 2
-    window = np.hanning(fft_size)
+    # FFT parameters
+    hop = fft_size // 2  # 50% overlap for better time resolution
+    window = np.hanning(fft_size)  # Window function to reduce spectral leakage
     specs = []
 
-    # Fix edge case: if samples exactly equals fft_size, ensure at least one window
+    # Compute FFT windows with overlap
+    # Edge case: if samples exactly equals fft_size, ensure at least one window
     max_start = max(0, len(samples) - fft_size)
+    
     if max_start == 0 and len(samples) >= fft_size:
-        # Single window case
+        # Single window case (audio is exactly fft_size samples)
         chunk = samples[0:fft_size] * window
-        spec = np.abs(np.fft.rfft(chunk))
+        spec = np.abs(np.fft.rfft(chunk))  # rfft = real FFT (only positive frequencies)
         specs.append(spec)
     else:
+        # Multiple windows with 50% overlap
+        # Overlap helps capture transients that might fall between windows
         for start in range(0, max_start, hop):
             chunk = samples[start:start + fft_size] * window
             spec = np.abs(np.fft.rfft(chunk))
             specs.append(spec)
     
+    if not specs:
+        # No valid FFT windows computed - this shouldn't happen but handle it
+        return None
+    
     # Apply high-pass filter in frequency domain to remove very low-frequency noise
     # This helps with Pi hardware artifacts and room rumble
-    if specs:
-        freq_resolution = sample_rate / fft_size
-        # Remove DC and very low frequencies (< 20 Hz typically)
-        # This is done after FFT to avoid phase issues with time-domain filtering
-        for i, spec in enumerate(specs):
-            # Zero out DC and very low frequencies
-            cutoff_bin = max(1, int(20.0 / freq_resolution))  # 20 Hz high-pass
-            spec[:cutoff_bin] = 0.0
-            specs[i] = spec
+    # Done after FFT to avoid phase issues with time-domain filtering
+    freq_resolution = sample_rate / fft_size  # Hz per bin
+    cutoff_bin = max(1, int(20.0 / freq_resolution))  # 20 Hz high-pass
+    
+    for i, spec in enumerate(specs):
+        # Zero out DC (bin 0) and very low frequencies (< 20 Hz)
+        # These are typically hardware artifacts, not actual audio content
+        spec[:cutoff_bin] = 0.0
+        specs[i] = spec
 
-    if not specs:
-        return None
-
+    # Average all FFT windows for stability
+    # Averaging reduces variance from individual window artifacts
     avg_spec = np.mean(specs, axis=0)
-    avg_spec = avg_spec / (np.linalg.norm(avg_spec) + 1e-9)
+    
+    # Normalize to unit length (L2 norm)
+    # This enables cosine similarity calculation (dot product of normalized vectors)
+    # The 1e-9 epsilon prevents division by zero for silent audio
+    norm = np.linalg.norm(avg_spec)
+    if norm < 1e-9:
+        # Silent or near-silent audio - return None rather than all-zeros
+        return None
+    
+    avg_spec = avg_spec / norm
     return avg_spec
 
 
@@ -606,8 +1032,15 @@ def find_best_chirp_segment(
         if window_spec is None:
             continue
         
-        # Calculate similarity
+        # Calculate similarity to chirp fingerprint
         sim = float(np.dot(fp, window_spec))
+        
+        # If non-chirp fingerprint is available, also calculate similarity to it
+        # We want HIGH similarity to chirp AND LOW similarity to non-chirp
+        non_chirp_sim = None
+        if "non_chirp_fingerprint" in fingerprint_info:
+            non_chirp_fp = fingerprint_info["non_chirp_fingerprint"]
+            non_chirp_sim = float(np.dot(non_chirp_fp, window_spec))
         
         # Calculate frequency characteristics
         total_energy = np.sum(window_spec)
@@ -646,7 +1079,16 @@ def find_best_chirp_segment(
         # Combined score: similarity weighted by frequency quality
         # Also give slight preference to smaller windows (more focused on chirp)
         window_size_factor = 1.0 + (1.0 - window_size) * 0.1  # Up to 10% bonus for smaller windows
-        combined_score = sim * max(0.0, freq_score) * window_size_factor
+        
+        # If non-chirp fingerprint is available, penalize high similarity to non-chirp
+        # This helps select segments that are clearly chirps, not ambiguous
+        non_chirp_penalty = 1.0
+        if non_chirp_sim is not None:
+            # Penalize if similarity to non-chirp is high (sounds like a non-chirp)
+            # Scale: 1.0 if non_chirp_sim is 0, decreasing as non_chirp_sim increases
+            non_chirp_penalty = max(0.5, 1.0 - non_chirp_sim * 0.5)
+        
+        combined_score = sim * max(0.0, freq_score) * window_size_factor * non_chirp_penalty
         
         if combined_score > best_score:
             best_score = combined_score
@@ -660,18 +1102,53 @@ def find_best_chirp_segment(
 
 
 def classify_event_is_chirp(
-    event_chunks, 
-    fingerprint_info, 
+    event_chunks: List[bytes], 
+    fingerprint_info: Optional[Dict[str, Any]], 
     duration_sec: float,
     config: Dict[str, Any]
 ) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
     """
-    Classify if event is a chirp.
-    Uses sliding window to find the best matching segment (handles cases where
-    noise at beginning masks chirp at end).
+    Classify if event is a chirp using multi-stage filtering.
     
+    This is the core classification function. It uses a sliding window approach
+    to find the best matching segment within the event, then applies multiple
+    filters to distinguish chirps from other sounds.
+    
+    Classification pipeline:
+        1. Sliding window: Find best segment (handles noise at start, chirp at end)
+        2. Duration check: Reject events > 2.0s (sustained sounds)
+        3. Frequency filtering: Reject fan noise (low-freq) and require high-freq content
+        4. Temporal analysis: Require energy concentration (staccato chirps)
+        5. Spectral similarity: Cosine similarity to trained fingerprint
+        6. Confidence scoring: Weighted combination of all factors
+    
+    Args:
+        event_chunks: List of raw PCM byte chunks (int16 little-endian)
+        fingerprint_info: Dictionary with fingerprint, sample_rate, fft_size (or None)
+        duration_sec: Total event duration in seconds
+        config: Configuration dictionary
+        
     Returns:
-        (is_chirp, similarity, confidence, rejection_reason)
+        Tuple of:
+            - is_chirp (bool): True if classified as chirp
+            - similarity (float or None): Cosine similarity score (0-1)
+            - confidence (float or None): Combined confidence score (0-1)
+            - rejection_reason (str or None): Why it was rejected (if not chirp)
+    
+    Rejection reasons:
+        - "no_fingerprint": Fingerprint file not loaded
+        - "no_valid_segment_*": Sliding window found no good segment
+        - "duration_too_long_*": Event exceeds max duration
+        - "too_much_low_freq_*": Too much energy in fan noise range
+        - "insufficient_high_freq_*": Not enough energy in chirp range
+        - "energy_too_spread_*": Energy not concentrated in first half
+        - "similarity_too_low_*": Similarity below threshold
+        - "spectrum_computation_failed": FFT computation failed
+    
+    Performance notes:
+        - FFT operations are CPU-intensive but only run during events
+        - Sliding window tries 6 different window sizes (minimal overhead)
+        - All filtering uses early exit (rejects as soon as criteria fail)
     """
     if fingerprint_info is None:
         return False, None, None, "no_fingerprint"

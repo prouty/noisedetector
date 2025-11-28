@@ -55,7 +55,20 @@ See `config.example.json` for full documentation of all parameters.
 1. **Install dependencies:**
    ```bash
    sudo apt-get update
-   sudo apt-get install -y python3 python3-pip python3-numpy alsa-utils
+   sudo apt-get install -y python3 python3-pip alsa-utils
+   
+   # Option 1: Use system packages (recommended, faster)
+   sudo apt-get install -y python3-numpy python3-pandas
+   pip3 install python-dateutil pytz six tzdata
+   
+   # Option 2: Use pip with proper installation script
+   # (Use this if system packages are outdated)
+   ./install_pi_requirements.sh
+   
+   # Option 3: Manual pip install (if above fail)
+   pip3 install --upgrade pip setuptools wheel
+   pip3 install numpy  # Install numpy first
+   pip3 install pandas  # Then pandas
    pip3 install -r requirements.txt
    ```
 
@@ -94,8 +107,17 @@ See `config.example.json` for full documentation of all parameters.
    ```
 
 2. **Train chirp fingerprint:**
-   - Place training files in `training/chirp/` as `chirp_*.wav`
+   - **Positive examples (required):** Place chirp training files in `training/chirp/` as `chirp_*.wav`
+   - **Negative examples (optional but recommended):** Place non-chirp examples in `training/not_chirp/` as `not_chirp_*.wav`
+     - Examples: door sounds, fan noise, other bird calls, mechanical clicks
+     - Helps the system learn what NOT to classify as chirps
    - Run: `make train`
+   
+   **Training tips:**
+   - Use 5-10+ chirp examples for best results
+   - Include diverse non-chirp examples (fan, doors, other sounds you want to reject)
+   - All files must have the same sample rate (matches config.json)
+   - The system will create both a chirp fingerprint and (if provided) a non-chirp fingerprint
 
 ## Usage
 
@@ -135,6 +157,7 @@ All commands use `.env` configuration automatically.
 **Quick Status:**
 - `make chirps` - Quick check for detected chirps in events.csv
 - `make chirps-recent` - Show chirps from last 24 hours
+- `make health` - Run system health check (dependencies, config, disk space, etc.)
 
 **Development:**
 - `make init` - Create virtual environment

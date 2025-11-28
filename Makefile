@@ -87,6 +87,14 @@ chirps-recent:
 	@echo "==> Checking for recent chirps (last 24 hours)..."
 	cd $(LOCAL_DIR) && python3 check_chirps.py --recent 24
 
+health:
+	@echo "==> Running system health check..."
+	cd $(LOCAL_DIR) && python3 health_check.py
+
+debug-state:
+	@echo "==> Dumping system state for debugging..."
+	cd $(LOCAL_DIR) && python3 debug_state.py
+
 init:
 	@echo "==> Initializing Python virtual environment locally..."
 	python3 -m venv venv
