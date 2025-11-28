@@ -3,8 +3,8 @@ Description=Run Noise Detector Email Report every 2 hours
 Requires=email-report.service
 
 [Timer]
-# Run every 2 hours
-OnCalendar=*:0/2:00
+# Run every 2 hours (at :00 minutes past even hours: 00:00, 02:00, 04:00, etc.)
+OnCalendar=*-*-* 0/2:00:00
 # Also run 2 hours after boot
 OnBootSec=2h
 # Run 2 hours after the last run (if missed)
