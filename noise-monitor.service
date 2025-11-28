@@ -6,7 +6,15 @@ After=network.target sound.target
 WorkingDirectory=/home/prouty/projects/noisedetector
 ExecStart=/usr/bin/python3 /home/prouty/projects/noisedetector/noise_detector.py monitor
 Restart=always
+RestartSec=10
 User=prouty
+
+# Capture stdout/stderr to systemd journal
+StandardOutput=journal
+StandardError=journal
+
+# Environment variables (if needed)
+Environment="PYTHONUNBUFFERED=1"
 
 [Install]
 WantedBy=multi-user.target

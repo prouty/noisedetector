@@ -19,6 +19,26 @@ if command -v apt-get &> /dev/null; then
     sudo apt-get install -y python3-numpy python3-pandas python3-dateutil || {
         echo "System packages not available or failed, falling back to pip..."
     }
+    
+    # If system packages installed successfully, skip pip installation
+    if python3 -c "import numpy; import pandas" 2>/dev/null; then
+        echo "✓ System packages work correctly, skipping pip installation"
+        echo ""
+        echo "Verifying installation..."
+        python3 -c "import numpy; import pandas; print(f'✓ numpy {numpy.__version__}'); print(f'✓ pandas {pandas.__version__}')"
+        echo ""
+        echo "✓ All dependencies installed successfully!"
+        exit 0
+    fi
+fi
+
+# Install OpenBLAS library (required for pip-installed numpy)
+echo ""
+echo "Installing OpenBLAS system library (required for numpy)..."
+if command -v apt-get &> /dev/null; then
+    sudo apt-get install -y libopenblas0 libopenblas-dev || {
+        echo "WARNING: Failed to install OpenBLAS, numpy may not work correctly"
+    }
 fi
 
 # Method 2: Install via pip with proper order

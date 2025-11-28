@@ -60,6 +60,11 @@ logs:
 	@echo "==> Viewing logs of noise-monitor service on Pi..."
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo journalctl -u noise-monitor -f'
 
+fix-deps:
+	@echo "==> Fixing NumPy dependencies on Pi..."
+	scp fix_numpy_deps.sh $(PI_HOST):$(PI_DIR)/
+	ssh $(PI_HOST) 'cd $(PI_DIR) && chmod +x fix_numpy_deps.sh && ./fix_numpy_deps.sh'
+
 report:
 	@echo "==> Generating chirp report from events.csv..."
 	cd $(LOCAL_DIR) && python3 generate_chirp_report.py

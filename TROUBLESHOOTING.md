@@ -26,7 +26,10 @@ python3 baseline.py validate
 
 ### 0. Dependency Installation Failures
 
-**Symptoms:** `pip install -r requirements.txt` fails with pandas build errors
+**Symptoms:** 
+- `pip install -r requirements.txt` fails with pandas build errors
+- Service fails with: `libopenblas.so.0: cannot open shared object file: No such file or directory`
+- `ImportError: Error importing numpy` when starting service
 
 **Diagnosis:**
 ```bash
@@ -35,17 +38,33 @@ python3 -c "import numpy; print(numpy.__version__)"
 
 # Check Python version
 python3 --version
+
+# Check for OpenBLAS error
+sudo journalctl -u noise-monitor -n 50 | grep -i openblas
 ```
 
 **Solutions:**
+
+- **Quick fix for OpenBLAS error (most common):**
+  ```bash
+  # From your Mac, run:
+  make fix-deps
+  
+  # Or manually on the Pi:
+  scp fix_numpy_deps.sh prouty@raspberrypi:/tmp/
+  ssh prouty@raspberrypi "chmod +x /tmp/fix_numpy_deps.sh && /tmp/fix_numpy_deps.sh"
+  ```
+
 - **Use system packages (recommended):**
   ```bash
-  sudo apt-get install python3-numpy python3-pandas
+  sudo apt-get install -y libopenblas0 libopenblas-dev
+  sudo apt-get install -y python3-numpy python3-pandas
   pip3 install python-dateutil pytz six tzdata
   ```
   
-- **Install in correct order:**
+- **Install in correct order (with OpenBLAS):**
   ```bash
+  sudo apt-get install -y libopenblas0 libopenblas-dev
   pip3 install numpy  # Must install first
   pip3 install pandas  # Then pandas
   pip3 install -r requirements.txt
@@ -77,10 +96,14 @@ sudo journalctl -u noise-monitor -n 50
 ```
 
 **Solutions:**
+- **OpenBLAS/numpy error:** See section 0 above - run `make fix-deps` or install OpenBLAS:
+  ```bash
+  sudo apt-get install -y libopenblas0 libopenblas-dev
+  ```
 - **Device busy:** Stop other processes using audio: `pkill arecord`, `pkill pulseaudio`
 - **Missing config:** Create `config.json` from `config.example.json`
 - **Permissions:** Add user to `audio` group: `sudo usermod -a -G audio $USER`
-- **Missing dependencies:** `pip3 install numpy`
+- **Missing dependencies:** Install system packages: `sudo apt-get install -y python3-numpy python3-pandas`
 
 ### 2. No Events Detected
 
