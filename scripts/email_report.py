@@ -34,6 +34,9 @@ from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any
 import argparse
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 
 
@@ -195,7 +198,7 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
 
 def main():
     parser = argparse.ArgumentParser(description="Generate and email noise detector report")
-    parser.add_argument("--events", type=Path, default=Path("events.csv"), help="Path to events.csv")
+    parser.add_argument("--events", type=Path, default=Path("data/events.csv"), help="Path to events.csv")
     parser.add_argument("--hours", type=int, default=2, help="Number of hours to include in report (default: 2)")
     parser.add_argument("--config", type=Path, help="Path to config.json")
     parser.add_argument("--email-only", action="store_true", help="Only send email (don't print to console)")

@@ -20,7 +20,7 @@ import numpy as np
 
 CHIRP_TRAIN_DIR = Path("training/chirp")
 NON_CHIRP_TRAIN_DIR = Path("training/not_chirp")
-OUTPUT_FILE = Path("chirp_fingerprint.json")
+OUTPUT_FILE = Path("data/chirp_fingerprint.json")
 
 INT16_FULL_SCALE = 32768.0
 

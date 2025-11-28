@@ -1,5 +1,8 @@
 #!/bin/bash
 # Install requirements on Raspberry Pi with proper order and error handling
+#
+# Note: You may see "WARNING: Error parsing dependencies of pyzmq: Invalid version: 'cpython'"
+# This is a harmless warning from pip's dependency resolver and can be safely ignored.
 
 set -e  # Exit on error
 
@@ -44,10 +47,12 @@ fi
 # Method 2: Install via pip with proper order
 echo ""
 echo "Installing/upgrading pip and build tools..."
+# Note: pyzmq warning is harmless - it's a dependency parsing issue, not an error
 python3 -m pip install --upgrade pip setuptools wheel
 
 echo ""
 echo "Installing numpy first (required for pandas build)..."
+# Note: pyzmq warning is harmless - it's a dependency parsing issue, not an error
 python3 -m pip install --no-cache-dir "numpy>=1.24.0,<2.1.0" || {
     echo "ERROR: Failed to install numpy"
     echo "Try: sudo apt-get install python3-numpy"
@@ -56,6 +61,7 @@ python3 -m pip install --no-cache-dir "numpy>=1.24.0,<2.1.0" || {
 
 echo ""
 echo "Installing pandas (this may take a while on Pi if building from source)..."
+# Note: pyzmq warning is harmless - it's a dependency parsing issue, not an error
 python3 -m pip install --no-cache-dir "pandas>=2.0.0,<2.2.0" || {
     echo "WARNING: pandas installation failed"
     echo "Trying older version with better ARM support..."
@@ -68,6 +74,7 @@ python3 -m pip install --no-cache-dir "pandas>=2.0.0,<2.2.0" || {
 
 echo ""
 echo "Installing remaining dependencies..."
+# Note: pyzmq warning is harmless - it's a dependency parsing issue, not an error
 python3 -m pip install --no-cache-dir \
     "python-dateutil>=2.8.0" \
     "pytz>=2024.1" \

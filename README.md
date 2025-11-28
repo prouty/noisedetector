@@ -49,7 +49,58 @@ cp config.example.json config.json
 
 See `config.example.json` for full documentation of all parameters.
 
+## Project Structure
+
+```
+noisedetector/
+├── README.md                 # This file
+├── Makefile                  # Common commands
+├── requirements.txt          # Python dependencies
+├── config.json              # Configuration (create from config.example.json)
+├── config.example.json      # Configuration template
+├── noise_detector.py        # Main entry point
+├── monitor.py               # Core monitoring logic
+├── baseline.py              # Baseline management
+├── sampler.py               # Audio sampling
+├── config_loader.py         # Configuration loader
+├── logger.py                # Logging utilities
+├── audio_analysis.py        # Audio analysis utilities
+├── utils.py                 # Utility functions
+├── scripts/                 # Python analysis and utility scripts
+│   ├── analyze_clips.py
+│   ├── check_chirps.py
+│   ├── diagnose_event.py
+│   ├── email_report.py
+│   ├── generate_chirp_report.py
+│   ├── health_check.py
+│   ├── train_chirp_fingerprint.py
+│   └── ...
+├── deploy/                  # Deployment and installation scripts
+│   ├── deploy_to_pi.sh
+│   ├── install_pi_requirements.sh
+│   ├── install_service.sh
+│   └── fix_numpy_deps.sh
+├── systemd/                 # Systemd service files
+│   ├── noise-monitor.service
+│   ├── email-report.service
+│   └── email-report.timer
+├── docs/                    # Documentation
+│   ├── ARCHITECTURE.md
+│   ├── TROUBLESHOOTING.md
+│   └── EMAIL_SETUP.md
+├── reports/                 # Generated reports
+│   └── chirp_report_*.md
+├── clips/                   # Event audio clips
+├── training/                # Training data
+└── data/                    # Data files
+    ├── events.csv           # Event log
+    ├── chirp_fingerprint.json  # Trained fingerprint
+    └── baseline.json        # Baseline calibration (auto-generated)
+```
+
 ## Setup
+
+> **📘 For detailed step-by-step setup instructions, see [docs/SETUP_PI.md](docs/SETUP_PI.md)**
 
 ### Raspberry Pi
 
@@ -64,7 +115,7 @@ See `config.example.json` for full documentation of all parameters.
    
    # Option 2: Use pip with proper installation script
    # (Use this if system packages are outdated)
-   ./install_pi_requirements.sh
+   ./deploy/install_pi_requirements.sh
    
    # Option 3: Manual pip install (if above fail)
    pip3 install --upgrade pip setuptools wheel
@@ -94,7 +145,7 @@ See `config.example.json` for full documentation of all parameters.
 4. **Install service:**
    ```bash
    # On development machine
-   ./install_service.sh
+   ./deploy/install_service.sh
    scp /tmp/noise-monitor.service ${PI_USER}@${PI_HOSTNAME}:/tmp/
    ssh ${PI_USER}@${PI_HOSTNAME} "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable noise-monitor && sudo systemctl start noise-monitor"
    ```
@@ -116,6 +167,9 @@ See `config.example.json` for full documentation of all parameters.
    ```
 
 2. **Train chirp fingerprint:**
+   ```bash
+   make train
+   ```
    - **Positive examples (required):** Place chirp training files in `training/chirp/` as `chirp_*.wav`
    - **Negative examples (optional but recommended):** Place non-chirp examples in `training/not_chirp/` as `not_chirp_*.wav`
      - Examples: door sounds, fan noise, other bird calls, mechanical clicks
@@ -180,7 +234,7 @@ All commands use `.env` configuration automatically.
 - `make shell` - Activate venv and start shell
 
 **Deployment:**
-- `./deploy_to_pi.sh` - Deploy code to Pi (excludes clips, training, venv, .git)
+- `./deploy/deploy_to_pi.sh` - Deploy code to Pi (excludes clips, training, venv, .git)
 
 ## Chirp Classification
 

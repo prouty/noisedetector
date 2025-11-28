@@ -23,8 +23,8 @@ def get_default_config() -> Dict[str, Any]:
             "segment_duration_sec": 300
         },
         "event_detection": {
-            "baseline_file": "baseline.json",
-            "events_file": "events.csv",
+            "baseline_file": "data/baseline.json",
+            "events_file": "data/events.csv",
             "threshold_above_baseline_db": 10.0,
             "min_event_duration_sec": 0.5,
             "baseline_window_chunks": 120
@@ -34,7 +34,7 @@ def get_default_config() -> Dict[str, Any]:
             "pre_roll_sec": 2.0
         },
         "chirp_classification": {
-            "fingerprint_file": "chirp_fingerprint.json",
+            "fingerprint_file": "data/chirp_fingerprint.json",
             "similarity_threshold": 0.8,
             "frequency_filtering": {
                 "fan_noise_max_freq_hz": 500,

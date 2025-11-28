@@ -3,7 +3,7 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime
 
-EVENTS_FILE = Path("events.csv")
+EVENTS_FILE = Path("data/events.csv")
 
 
 def load_events():
@@ -109,8 +109,11 @@ def main():
 
     report_md = build_report(df, report_date)
 
+    # Write to reports/ directory
+    reports_dir = Path("reports")
+    reports_dir.mkdir(exist_ok=True)
     out_name = f"chirp_report_{report_date}.md"
-    out_path = Path(out_name)
+    out_path = reports_dir / out_name
     out_path.write_text(report_md, encoding="utf-8")
 
     print(f"Wrote report to {out_path.resolve()}")

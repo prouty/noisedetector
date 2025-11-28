@@ -1,12 +1,16 @@
 #!/usr/bin/env bash
 
+# Get the script's directory and find the project root (one level up)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+
 # Load environment variables from .env file if it exists
-if [ -f .env ]; then
+if [ -f "$PROJECT_ROOT/.env" ]; then
     set -a  # automatically export all variables
     # Filter out comments and empty lines, then source
     tmpfile=$(mktemp)
     # Remove lines that start with # (with optional leading whitespace) or are empty
-    sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' .env > "$tmpfile"
+    sed -e 's/^[[:space:]]*#.*$//' -e '/^[[:space:]]*$/d' "$PROJECT_ROOT/.env" > "$tmpfile"
     source "$tmpfile"
     rm "$tmpfile"
     set +a
@@ -18,8 +22,9 @@ PI_HOSTNAME="${PI_HOSTNAME:-raspberrypi.local}"
 PI_HOST="${PI_USER}@${PI_HOSTNAME}"
 REMOTE_DIR="${PI_DIR:-/home/prouty/projects/noisedetector}"
 
-# This rsync command syncs all files and folders in the current directory (./)
+# This rsync command syncs all files and folders from the project root
 # to the remote target, except for the files and directories explicitly excluded below.
+cd "$PROJECT_ROOT"
 rsync -avz \
 	--exclude '.DS_Store' \
 	--exclude 'clips' \
@@ -28,8 +33,8 @@ rsync -avz \
 	--exclude 'recordings' \
 	--exclude 'baseline.json' \
 	--exclude 'config.json' \
-	--exclude 'events.csv' \
-	--exclude 'chirp_report*.md' \
+	--exclude 'data' \
+	--exclude 'reports' \
 	--exclude 'validation_results.csv' \
 	--exclude 'clip_analysis.csv' \
 	--exclude 'tuning_results.csv' \

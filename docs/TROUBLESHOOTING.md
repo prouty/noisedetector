@@ -51,7 +51,7 @@ sudo journalctl -u noise-monitor -n 50 | grep -i openblas
   make fix-deps
   
   # Or manually on the Pi:
-  scp fix_numpy_deps.sh prouty@raspberrypi:/tmp/
+  scp deploy/fix_numpy_deps.sh prouty@raspberrypi:/tmp/
   ssh prouty@raspberrypi "chmod +x /tmp/fix_numpy_deps.sh && /tmp/fix_numpy_deps.sh"
   ```
 
@@ -72,7 +72,7 @@ sudo journalctl -u noise-monitor -n 50 | grep -i openblas
   
 - **Use installation script:**
   ```bash
-  ./install_pi_requirements.sh
+  ./deploy/install_pi_requirements.sh
   ```
   
 - **If pandas build fails:** Use older version with better ARM support:
