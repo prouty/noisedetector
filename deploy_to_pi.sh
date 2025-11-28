@@ -27,6 +27,7 @@ rsync -avz \
 	--exclude 'old_events' \
 	--exclude 'recordings' \
 	--exclude 'baseline.json' \
+	--exclude 'config.json' \
 	--exclude 'events.csv' \
 	--exclude 'chirp_report*.md' \
 	--exclude 'validation_results.csv' \

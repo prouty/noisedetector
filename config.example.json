@@ -42,6 +42,16 @@
       "frequency_weight": 0.2,
       "temporal_weight": 0.2
     }
+  },
+  "email": {
+    "smtp_server": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_username": "",
+    "smtp_password": "",
+    "from_address": "",
+    "to_address": "",
+    "use_tls": true,
+    "report_hours": 2
   }
 }
 

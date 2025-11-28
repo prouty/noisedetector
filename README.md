@@ -9,6 +9,7 @@ A Raspberry Pi-based audio monitoring system that detects noise events, records 
 - **Advanced Chirp Classification**: Uses spectral fingerprinting with frequency filtering, temporal analysis, and confidence scoring
 - **Event Clips**: Automatically saves short audio clips of detected events with pre-roll context
 - **Event Logging**: Records all events to CSV with timestamps, duration, classification results, confidence scores, and rejection reasons
+- **Email Reports**: Automated email summaries every 2 hours with clip counts and chirp details
 - **Configuration System**: All thresholds and settings configurable via `config.json`
 - **Validation & Tuning Tools**: Tools to analyze accuracy, tune thresholds, and diagnose classification decisions
 
@@ -98,6 +99,14 @@ See `config.example.json` for full documentation of all parameters.
    ssh ${PI_USER}@${PI_HOSTNAME} "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable noise-monitor && sudo systemctl start noise-monitor"
    ```
 
+5. **Setup email reports (optional):**
+   ```bash
+   # Configure email settings (see EMAIL_SETUP.md for details)
+   # Then install the email timer:
+   make install-email-timer
+   ```
+   See `EMAIL_SETUP.md` for detailed email configuration instructions.
+
 ### Development Machine
 
 1. **Setup:**
@@ -153,6 +162,13 @@ All commands use `.env` configuration automatically.
 
 **Audio Calibration:**
 - `make audio-check` - Validate audio capture levels on Pi (checks for clipping, DC offset, noise floor)
+
+**Email Reports:**
+- `make email-report` - Send email report manually
+- `make email-report-test` - Test email report (no email sent)
+- `make install-email-timer` - Install automated email timer (runs every 2 hours)
+- `make email-timer-status` - Check email timer status
+- `make email-timer-logs` - View email report logs
 
 **Quick Status:**
 - `make chirps` - Quick check for detected chirps in events.csv

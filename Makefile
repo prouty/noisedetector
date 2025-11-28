@@ -117,4 +117,25 @@ shell:
 	@echo "==> Activating virtual environment and starting zsh locally..."
 	@source venv/bin/activate && exec zsh
 
+email-report:
+	@echo "==> Running email report on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 email_report.py'
+
+email-report-test:
+	@echo "==> Testing email report on Pi (no email sent)..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 email_report.py --no-email'
+
+install-email-timer:
+	@echo "==> Installing email report timer on Pi..."
+	scp email-report.service email-report.timer $(PI_HOST):$(PI_DIR)/
+	ssh $(PI_HOST) "sudo cp $(PI_DIR)/email-report.service $(PI_DIR)/email-report.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now email-report.timer"
+
+email-timer-status:
+	@echo "==> Checking email report timer status on Pi..."
+	ssh $(PI_HOST) 'systemctl status email-report.timer'
+
+email-timer-logs:
+	@echo "==> Viewing email report logs on Pi..."
+	ssh $(PI_HOST) 'journalctl -u email-report.service -n 50'
+
 workflow: pull report
