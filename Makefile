@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull train deploy deploy-restart restart reload stop start report workflow
+.PHONY: pull pull-chirps train deploy deploy-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report audio-check chirps chirps-recent health baseline-set baseline-set-duration baseline-show baseline-analyze baseline-validate debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
 
 pull:
 	@echo "==> Pulling events.csv and clips from Pi..."
@@ -103,12 +103,45 @@ chirps-recent:
 	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/check_chirps.py --recent 24
 
 health:
-	@echo "==> Running system health check..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/health_check.py
+	@echo "==> Running system health check on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/health_check.py'
+
+baseline-set:
+	@echo "==> Setting baseline on Pi (this will stop the service temporarily)..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor' || true
+	@echo "==> Collecting baseline data..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py set'
+	@echo "==> Restarting noise-monitor service..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
+
+baseline-set-duration:
+	@echo "==> Setting baseline on Pi with custom duration (this will stop the service temporarily)..."
+	@echo "Usage: make baseline-set-duration DURATION=20"
+	@if [ -z "$(DURATION)" ]; then \
+		echo "Error: DURATION not set. Example: make baseline-set-duration DURATION=20"; \
+		exit 1; \
+	fi
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor' || true
+	@echo "==> Collecting baseline data for $(DURATION) seconds..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py set --duration $(DURATION)'
+	@echo "==> Restarting noise-monitor service..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
+
+baseline-show:
+	@echo "==> Showing baseline on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py show'
+
+baseline-analyze:
+	@echo "==> Analyzing baseline history on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py analyze'
+
+baseline-validate:
+	@echo "==> Validating baseline on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py validate'
 
 debug-state:
-	@echo "==> Dumping system state for debugging..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/debug_state.py
+	@echo "==> Dumping system state for debugging on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/debug_state.py'
 
 init:
 	@echo "==> Initializing Python virtual environment locally..."

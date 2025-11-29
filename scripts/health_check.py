@@ -90,19 +90,50 @@ def check_audio_device(device: str) -> Tuple[bool, str]:
 def check_dependencies() -> Tuple[bool, str]:
     """Check if required Python packages are installed."""
     missing = []
+    issues = []
     
     try:
         import numpy
+        # Check numpy version compatibility
+        try:
+            numpy_version = numpy.__version__
+            # Basic version check - numpy 2.x may have compatibility issues
+            major_version = int(numpy_version.split('.')[0])
+            if major_version >= 2:
+                # Check if _ARRAY_API exists (numpy 2.x compatibility marker)
+                if not hasattr(numpy, '_ARRAY_API'):
+                    issues.append(f"numpy {numpy_version} may have compatibility issues")
+        except (AttributeError, ValueError, IndexError):
+            pass
     except ImportError:
         missing.append("numpy")
+    except Exception as e:
+        issues.append(f"numpy import error: {e}")
     
     try:
         import pandas
+        # Check for bottleneck version warning
+        try:
+            import bottleneck
+            bottleneck_version = bottleneck.__version__
+            # Pandas 2.0+ requires bottleneck >= 1.3.6
+            version_parts = [int(x) for x in bottleneck_version.split('.')[:3]]
+            if version_parts < [1, 3, 6]:
+                issues.append(f"bottleneck {bottleneck_version} is too old (need >= 1.3.6)")
+        except ImportError:
+            pass  # bottleneck is optional
+        except Exception:
+            pass  # Ignore bottleneck check errors
     except ImportError:
         missing.append("pandas")
+    except Exception as e:
+        issues.append(f"pandas import error: {e}")
     
     if missing:
         return False, f"Missing packages: {', '.join(missing)}. Run: pip3 install {' '.join(missing)}"
+    
+    if issues:
+        return False, f"Dependency issues: {'; '.join(issues)}. Try: pip3 install --upgrade numpy pandas bottleneck"
     
     return True, "All dependencies installed"
 
@@ -213,33 +244,53 @@ def run_health_check(config_path: Path = None) -> bool:
     if not ok:
         all_ok = False
     
-    # Check file permissions
-    events_file = Path("events.csv")
+    # Load config for path-dependent checks
+    try:
+        config = config_loader.load_config(config_path)
+    except Exception as e:
+        checks.append(("Configuration Load", False, f"Failed to load config: {e}"))
+        all_ok = False
+        config = None
+    
+    # Check file permissions (using config paths if available)
+    if config:
+        events_file = Path(config.get("event_detection", {}).get("events_file", "data/events.csv"))
+        clips_dir = Path(config.get("event_clips", {}).get("clips_dir", "clips"))
+    else:
+        events_file = Path("data/events.csv")
+        clips_dir = Path("clips")
+    
     ok, msg = check_file_permissions(events_file.parent if events_file.parent != Path(".") else Path.cwd(), need_write=True)
     checks.append(("Events File Directory", ok, msg))
     if not ok:
         all_ok = False
     
-    clips_dir = Path("clips")
     ok, msg = check_file_permissions(clips_dir, need_write=True)
     checks.append(("Clips Directory", ok, msg))
     if not ok:
         all_ok = False
     
     # Check audio device (basic)
-    try:
-        config = config_loader.load_config(config_path)
-        device = config.get("audio", {}).get("device", "")
-        ok, msg = check_audio_device(device)
-        checks.append(("Audio System", ok, msg))
-        if not ok:
+    if config:
+        try:
+            device = config.get("audio", {}).get("device", "")
+            ok, msg = check_audio_device(device)
+            checks.append(("Audio System", ok, msg))
+            if not ok:
+                all_ok = False
+        except Exception as e:
+            checks.append(("Audio System", False, f"Could not check: {e}"))
             all_ok = False
-    except Exception as e:
-        checks.append(("Audio System", False, f"Could not check: {e}"))
+    else:
+        checks.append(("Audio System", False, "Config not loaded"))
         all_ok = False
     
-    # Check baseline
-    baseline_file = Path("baseline.json")
+    # Check baseline (using config path)
+    if config:
+        baseline_file = Path(config.get("event_detection", {}).get("baseline_file", "data/baseline.json"))
+    else:
+        baseline_file = Path("data/baseline.json")
+    
     ok, msg = check_baseline(baseline_file)
     checks.append(("Baseline", ok, msg))
     if not ok:
