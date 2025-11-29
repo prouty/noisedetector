@@ -14,6 +14,7 @@
   },
   "event_detection": {
     "baseline_file": "data/baseline.json",
+    "baseline_name": null,
     "events_file": "data/events.csv",
     "threshold_above_baseline_db": 10.0,
     "min_event_duration_sec": 0.5,

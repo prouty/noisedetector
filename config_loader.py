@@ -24,6 +24,7 @@ def get_default_config() -> Dict[str, Any]:
         },
         "event_detection": {
             "baseline_file": "data/baseline.json",
+            "baseline_name": None,  # None = use active baseline from index, or "default" for backward compatibility
             "events_file": "data/events.csv",
             "threshold_above_baseline_db": 10.0,
             "min_event_duration_sec": 0.5,

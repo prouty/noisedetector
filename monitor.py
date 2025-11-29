@@ -178,11 +178,11 @@ def open_new_wav_segment(start_time: datetime.datetime, config: Dict[str, Any]) 
 
 def load_initial_baseline(config: Dict[str, Any]) -> Optional[float]:
     """
-    Load initial baseline from baseline.json file.
+    Load initial baseline from named baseline system or fallback to old format.
     
-    The baseline file can contain either:
-    1. Single baseline object: {"rms_db": -45.2, "timestamp": "..."}
-    2. History array: [{"rms_db": -45.2, ...}, ...] (uses last entry)
+    Supports:
+    1. Named baseline system (new): Uses baseline_name from config or active baseline
+    2. Old baseline.json file (backward compatibility)
     
     If no baseline file exists, returns None and system uses rolling baseline only.
     Rolling baseline is calculated from recent audio chunks (20th percentile).
@@ -195,14 +195,49 @@ def load_initial_baseline(config: Dict[str, Any]) -> Optional[float]:
         
     Common issues:
         - File not found: Normal - system will use rolling baseline
-        - Invalid JSON: File corrupted, regenerate with 'python3 baseline.py set'
+        - Invalid JSON: File corrupted, regenerate with 'python3 baseline.py create <name>'
         - Missing rms_db: Old format, regenerate baseline
     """
+    import baseline as baseline_module
+    
+    # Try named baseline system first
+    baseline_name = config.get("event_detection", {}).get("baseline_name")
+    
+    # Auto-migrate old baseline if needed
+    baseline_module.migrate_old_baseline()
+    
+    # Get baseline name (from config, active, or default)
+    index = baseline_module.get_baselines_index()
+    if baseline_name is None:
+        baseline_name = index.get("active", "default")
+    
+    # Try to load named baseline
+    if baseline_name in index.get("baselines", {}):
+        baseline_file = baseline_module.get_baseline_file(baseline_name)
+        if baseline_file.exists():
+            try:
+                history = baseline_module.load_baseline_history(baseline_file)
+                if history:
+                    latest = history[-1]
+                    rms_db = float(latest.get("rms_db"))
+                    
+                    # Validate reasonable range
+                    if not (-100 < rms_db < 0):
+                        print(f"[WARN] Baseline RMS value seems unusual: {rms_db:.1f} dBFS")
+                        print("  Expected range: -100 to 0 dBFS")
+                        print(f"  Regenerate with: python3 baseline.py create {baseline_name}")
+                    
+                    print(f"[INFO] Loaded baseline '{baseline_name}' RMS: {rms_db:.1f} dBFS")
+                    return rms_db
+            except Exception as e:
+                print(f"[WARN] Failed to load named baseline '{baseline_name}': {e}")
+    
+    # Fallback to old baseline.json file (backward compatibility)
     baseline_file = Path(config["event_detection"]["baseline_file"])
     
     if not baseline_file.exists():
-        print("[INFO] No baseline.json found; using rolling baseline only.")
-        print("  To set initial baseline: python3 baseline.py set")
+        print("[INFO] No baseline found; using rolling baseline only.")
+        print("  To set initial baseline: python3 baseline.py create <name>")
         return None
     
     try:
@@ -210,7 +245,7 @@ def load_initial_baseline(config: Dict[str, Any]) -> Optional[float]:
             data = json.load(f)
     except json.JSONDecodeError as e:
         print(f"[WARN] Invalid JSON in baseline file {baseline_file}: {e}")
-        print("  File may be corrupted. Regenerate with: python3 baseline.py set")
+        print("  File may be corrupted. Regenerate with: python3 baseline.py create <name>")
         return None
     except Exception as e:
         print(f"[WARN] Failed to read baseline file {baseline_file}: {e}")
@@ -232,14 +267,14 @@ def load_initial_baseline(config: Dict[str, Any]) -> Optional[float]:
         if not (-100 < rms_db < 0):
             print(f"[WARN] Baseline RMS value seems unusual: {rms_db:.1f} dBFS")
             print("  Expected range: -100 to 0 dBFS")
-            print("  Regenerate with: python3 baseline.py set")
+            print("  Regenerate with: python3 baseline.py create <name>")
         
         print(f"[INFO] Loaded baseline RMS from {baseline_file}: {rms_db:.1f} dBFS")
         return rms_db
     
     except (ValueError, TypeError, KeyError) as e:
         print(f"[WARN] Invalid baseline data in {baseline_file}: {e}")
-        print("  Missing or invalid 'rms_db' field. Regenerate with: python3 baseline.py set")
+        print("  Missing or invalid 'rms_db' field. Regenerate with: python3 baseline.py create <name>")
         return None
 
 

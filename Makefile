@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps train deploy deploy-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report audio-check chirps chirps-recent health baseline-set baseline-set-duration baseline-show baseline-analyze baseline-validate debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
+.PHONY: pull pull-chirps train deploy deploy-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
 
 pull:
 	@echo "==> Pulling events.csv and clips from Pi..."
@@ -106,8 +106,74 @@ health:
 	@echo "==> Running system health check on Pi..."
 	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/health_check.py'
 
+baseline-list:
+	@echo "==> Listing baselines on Pi..."
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py list'
+
+baseline-create:
+	@echo "==> Creating baseline on Pi (this will stop the service temporarily)..."
+	@echo "Usage: make baseline-create NAME=daytime [DURATION=10] [DESC=\"Daytime baseline\"]"
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME not set. Example: make baseline-create NAME=daytime"; \
+		exit 1; \
+	fi
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor' || true
+	@echo "==> Collecting baseline data for '$(NAME)'..."
+	@if [ -n "$(DESC)" ]; then \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(or $(DURATION),10) --description "$(DESC)"'; \
+	else \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(or $(DURATION),10)'; \
+	fi
+	@echo "==> Restarting noise-monitor service..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
+
+baseline-delete:
+	@echo "==> Deleting baseline on Pi..."
+	@echo "Usage: make baseline-delete NAME=daytime"
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME not set. Example: make baseline-delete NAME=daytime"; \
+		exit 1; \
+	fi
+	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py delete "$(NAME)"'
+
+baseline-switch:
+	@echo "==> Switching baseline on Pi..."
+	@echo "Usage: make baseline-switch NAME=daytime"
+	@if [ -z "$(NAME)" ]; then \
+		echo "Error: NAME not set. Example: make baseline-switch NAME=daytime"; \
+		exit 1; \
+	fi
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py switch "$(NAME)"'
+	@echo "==> Restarting noise-monitor service for changes to take effect..."
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl restart noise-monitor'
+
+baseline-show:
+	@echo "==> Showing baseline on Pi..."
+	@if [ -n "$(NAME)" ]; then \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py show "$(NAME)"'; \
+	else \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py show'; \
+	fi
+
+baseline-analyze:
+	@echo "==> Analyzing baseline history on Pi..."
+	@if [ -n "$(NAME)" ]; then \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py analyze "$(NAME)"'; \
+	else \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py analyze'; \
+	fi
+
+baseline-validate:
+	@echo "==> Validating baseline on Pi..."
+	@if [ -n "$(NAME)" ]; then \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py validate "$(NAME)"'; \
+	else \
+		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py validate'; \
+	fi
+
+# Backward compatibility - creates/updates 'default' baseline
 baseline-set:
-	@echo "==> Setting baseline on Pi (this will stop the service temporarily)..."
+	@echo "==> Setting default baseline on Pi (this will stop the service temporarily)..."
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor' || true
 	@echo "==> Collecting baseline data..."
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py set'
@@ -115,7 +181,7 @@ baseline-set:
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
 
 baseline-set-duration:
-	@echo "==> Setting baseline on Pi with custom duration (this will stop the service temporarily)..."
+	@echo "==> Setting default baseline on Pi with custom duration (this will stop the service temporarily)..."
 	@echo "Usage: make baseline-set-duration DURATION=20"
 	@if [ -z "$(DURATION)" ]; then \
 		echo "Error: DURATION not set. Example: make baseline-set-duration DURATION=20"; \
@@ -126,18 +192,6 @@ baseline-set-duration:
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py set --duration $(DURATION)'
 	@echo "==> Restarting noise-monitor service..."
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
-
-baseline-show:
-	@echo "==> Showing baseline on Pi..."
-	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py show'
-
-baseline-analyze:
-	@echo "==> Analyzing baseline history on Pi..."
-	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py analyze'
-
-baseline-validate:
-	@echo "==> Validating baseline on Pi..."
-	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py validate'
 
 debug-state:
 	@echo "==> Dumping system state for debugging on Pi..."
@@ -171,5 +225,10 @@ email-timer-status:
 email-timer-logs:
 	@echo "==> Viewing email report logs on Pi..."
 	ssh $(PI_HOST) 'journalctl -u email-report.service -n 50'
+
+config-merge:
+	@echo "==> Merging config.example.json with config.json..."
+	@jq '. * input' config.example.json config.json > config.json.tmp && mv config.json.tmp config.json
+	@echo "✓ Config merged (your values preserved, missing keys added)"
 
 workflow: pull report

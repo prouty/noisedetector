@@ -285,13 +285,40 @@ def run_health_check(config_path: Path = None) -> bool:
         checks.append(("Audio System", False, "Config not loaded"))
         all_ok = False
     
-    # Check baseline (using config path)
+    # Check baseline (using named baseline system or fallback to old format)
     if config:
-        baseline_file = Path(config.get("event_detection", {}).get("baseline_file", "data/baseline.json"))
+        try:
+            import baseline as baseline_module
+            # Auto-migrate old baseline if needed
+            baseline_module.migrate_old_baseline()
+            
+            # Get baseline name from config or use active
+            baseline_name = config.get("event_detection", {}).get("baseline_name")
+            index = baseline_module.get_baselines_index()
+            
+            if baseline_name is None:
+                baseline_name = index.get("active", "default")
+            
+            # Try named baseline
+            if baseline_name in index.get("baselines", {}):
+                baseline_file = baseline_module.get_baseline_file(baseline_name)
+                ok, msg = check_baseline(baseline_file)
+                if ok:
+                    msg = f"Baseline '{baseline_name}': {msg}"
+                else:
+                    msg = f"Baseline '{baseline_name}': {msg}"
+            else:
+                # Fallback to old baseline.json
+                baseline_file = Path(config.get("event_detection", {}).get("baseline_file", "data/baseline.json"))
+                ok, msg = check_baseline(baseline_file)
+        except Exception as e:
+            # Fallback to old method
+            baseline_file = Path(config.get("event_detection", {}).get("baseline_file", "data/baseline.json"))
+            ok, msg = check_baseline(baseline_file)
     else:
         baseline_file = Path("data/baseline.json")
+        ok, msg = check_baseline(baseline_file)
     
-    ok, msg = check_baseline(baseline_file)
     checks.append(("Baseline", ok, msg))
     if not ok:
         all_ok = False
