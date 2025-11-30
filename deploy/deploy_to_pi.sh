@@ -24,6 +24,7 @@ REMOTE_DIR="${PI_DIR:-/home/prouty/projects/noisedetector}"
 
 # This rsync command syncs all files and folders from the project root
 # to the remote target, except for the files and directories explicitly excluded below.
+# Note: data/chirp_fingerprint.json is included (needed on Pi), but other data files are excluded.
 cd "$PROJECT_ROOT"
 rsync -avz \
 	--exclude '.DS_Store' \
@@ -33,7 +34,10 @@ rsync -avz \
 	--exclude 'recordings' \
 	--exclude 'baseline.json' \
 	--exclude 'config.json' \
-	--exclude 'data' \
+	--include 'data/' \
+	--include 'data/chirp_fingerprint.json' \
+	--exclude 'data/baselines' \
+	--exclude 'data/*' \
 	--exclude 'reports' \
 	--exclude 'validation_results.csv' \
 	--exclude 'clip_analysis.csv' \
