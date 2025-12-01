@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps train train-ml train-ml-svm deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
+.PHONY: pull pull-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml
 
 pull:
 	@echo "==> Pulling events.csv and clips (<=10s) from Pi..."
@@ -82,6 +82,18 @@ train:
 train-ml:
 	@echo "==> Training ML model for chirp classification..."
 	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_ml.py
+
+train-capture-ml:
+	@echo "==> Training ML model for capture decision..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_capture_ml.py
+
+test:
+	@echo "==> Running all tests..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && pytest tests/ -v
+
+test-capture-ml:
+	@echo "==> Running ML capture validation tests..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && pytest tests/test_capture_ml.py -v
 
 train-ml-svm:
 	@echo "==> Training SVM model for chirp classification..."

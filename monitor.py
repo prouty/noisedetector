@@ -14,6 +14,17 @@ import wave
 
 import config_loader
 
+# Import capture ML module (optional, for ML-based capture decision)
+try:
+    from scripts.capture_ml import load_capture_model, should_capture_chunk
+    CAPTURE_ML_AVAILABLE = True
+except ImportError:
+    CAPTURE_ML_AVAILABLE = False
+    def load_capture_model(config):
+        return None
+    def should_capture_chunk(samples, sr, model_info, baseline_rms_db=None):
+        return False, 0.0
+
 # Normalization constant for int16 PCM
 INT16_FULL_SCALE = 32768.0            # 2^15, maps int16 to roughly [-1.0, 1.0)
 BYTES_PER_SAMPLE = 2                  # 16-bit = 2 bytes
@@ -460,7 +471,21 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
     pre_roll_chunks = int(event_clips["pre_roll_sec"] / chunk_duration)
     baseline_window_chunks = event_detection["baseline_window_chunks"]
     
-    # Load classifier (ML or fingerprint)
+    # Load capture decision model (ML-based capture)
+    use_ml_capture = event_detection.get("use_ml_capture", False)
+    capture_ml_model = None
+    if use_ml_capture and CAPTURE_ML_AVAILABLE:
+        capture_ml_model = load_capture_model(config)
+        if capture_ml_model:
+            print("[INFO] ML capture decision: ENABLED")
+        else:
+            print("[WARN] ML capture model not found, falling back to threshold")
+            use_ml_capture = False
+    elif use_ml_capture and not CAPTURE_ML_AVAILABLE:
+        print("[WARN] ML capture module not available, falling back to threshold")
+        use_ml_capture = False
+    
+    # Load classifier (ML or fingerprint) for post-capture classification
     chirp_cfg = config["chirp_classification"]
     use_ml = chirp_cfg.get("use_ml_classifier", False)
     
@@ -489,7 +514,10 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
     print(f"Output Directory: {Path(recording['output_dir']).resolve()}")
     print(f"Events Log: {Path(event_detection['events_file']).resolve()}")
     print(f"Clips Directory: {Path(event_clips['clips_dir']).resolve()}")
-    print(f"Baseline Threshold: +{event_detection['threshold_above_baseline_db']:.1f} dB")
+    if use_ml_capture:
+        print(f"Capture Decision: ML-BASED")
+    else:
+        print(f"Capture Decision: THRESHOLD (+{event_detection['threshold_above_baseline_db']:.1f} dB)")
     print(f"Min Event Duration: {event_detection['min_event_duration_sec']:.1f}s")
     if classifier_info:
         if use_ml and ml_model_info:
@@ -645,8 +673,21 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
 
             # Event state machine
             if not in_event:
-                # Check if we should start an event
-                if rms_db > threshold_db:
+                # Check if we should start an event (ML-based or threshold-based)
+                should_capture = False
+                capture_confidence = 0.0
+                
+                if use_ml_capture and capture_ml_model:
+                    # Use ML model for capture decision
+                    should_capture, capture_confidence = should_capture_chunk(
+                        float_samples, sample_rate, capture_ml_model, baseline_rms_db
+                    )
+                else:
+                    # Fallback to threshold-based decision
+                    should_capture = rms_db > threshold_db
+                    capture_confidence = 0.5 if should_capture else 0.0
+                
+                if should_capture:
                     in_event = True
                     event_start_time = timestamp
                     event_end_time = timestamp

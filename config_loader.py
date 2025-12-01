@@ -28,7 +28,11 @@ def get_default_config() -> Dict[str, Any]:
             "events_file": "data/events.csv",
             "threshold_above_baseline_db": 10.0,
             "min_event_duration_sec": 0.5,
-            "baseline_window_chunks": 120
+            "baseline_window_chunks": 120,
+            "use_ml_capture": False,  # Use ML model for capture decision instead of threshold
+            "capture_ml_model_file": "data/capture_ml_model.joblib",
+            "capture_ml_scaler_file": "data/capture_ml_scaler.joblib",
+            "capture_ml_metadata_file": "data/capture_ml_metadata.json"
         },
         "event_clips": {
             "clips_dir": "clips",
