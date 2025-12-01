@@ -9,13 +9,23 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps train train-ml train-ml-svm deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
+.PHONY: pull pull-chirps train train-ml train-ml-svm deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
 
 pull:
-	@echo "==> Pulling events.csv and clips from Pi..."
-	rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/
-	rsync -avzu --exclude='.DS_Store' --include="*/" --include="clip_*.wav" --exclude="*" \
-		$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/
+	@echo "==> Pulling events.csv and clips (<=10s) from Pi..."
+	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
+	@echo "==> Filtering clips by duration (<=10s)..."
+	@cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/pull_short_clips.py data/events.csv.tmp > /tmp/short_clips.txt
+	@mv $(LOCAL_DIR)/data/events.csv.tmp $(LOCAL_DIR)/data/events.csv
+	@if [ -s /tmp/short_clips.txt ]; then \
+		echo "==> Transferring $$(wc -l < /tmp/short_clips.txt) clips (<=10s)..."; \
+		rsync -avz --files-from=/tmp/short_clips.txt \
+			$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+		echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+	else \
+		echo "==> No clips <=10s found in events.csv"; \
+	fi
+	@rm -f /tmp/short_clips.txt
 
 pull-chirps:
 	@echo "==> Pulling events.csv to identify chirps..."
@@ -110,6 +120,34 @@ rediagnose-report: rediagnose report
 compare-classifiers:
 	@echo "==> Comparing ML vs fingerprint classifiers on reviewed events..."
 	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/compare_classifiers.py
+
+mark-chirp:
+	@echo "==> Marking clip as valid chirp..."
+	@echo "Usage: make mark-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"
+	@echo "   Or: make mark-chirp-latest (marks latest unreviewed event)"
+	@if [ -z "$(CLIP)" ]; then \
+		echo "Error: CLIP not set. Example: make mark-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"; \
+		exit 1; \
+	fi
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --chirp --clip "$(CLIP)"
+
+mark-chirp-latest:
+	@echo "==> Marking latest unreviewed event as valid chirp..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --chirp --from-events
+
+mark-not-chirp:
+	@echo "==> Marking clip as not chirp..."
+	@echo "Usage: make mark-not-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"
+	@echo "   Or: make mark-not-chirp-latest (marks latest unreviewed event)"
+	@if [ -z "$(CLIP)" ]; then \
+		echo "Error: CLIP not set. Example: make mark-not-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"; \
+		exit 1; \
+	fi
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --clip "$(CLIP)"
+
+mark-not-chirp-latest:
+	@echo "==> Marking latest unreviewed event as not chirp..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --from-events
 
 audio-check:
 	@echo "==> Stopping noise-monitor service (audio device needed)..."
