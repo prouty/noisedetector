@@ -26,6 +26,8 @@
   },
   "chirp_classification": {
     "fingerprint_file": "data/chirp_fingerprint.json",
+    "use_ml_classifier": false,
+    "ml_metadata_file": "data/chirp_model_metadata.json",
     "similarity_threshold": 0.8,
     "frequency_filtering": {
       "fan_noise_max_freq_hz": 500,

@@ -460,8 +460,25 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
     pre_roll_chunks = int(event_clips["pre_roll_sec"] / chunk_duration)
     baseline_window_chunks = event_detection["baseline_window_chunks"]
     
-    # Load fingerprint before printing status (needed for status message)
-    fingerprint_info = load_chirp_fingerprint(config)
+    # Load classifier (ML or fingerprint)
+    chirp_cfg = config["chirp_classification"]
+    use_ml = chirp_cfg.get("use_ml_classifier", False)
+    
+    fingerprint_info = None
+    ml_model_info = None
+    classifier_info = None
+    
+    if use_ml:
+        ml_model_info = load_chirp_ml_model(config)
+        if ml_model_info:
+            classifier_info = ml_model_info
+        else:
+            print("[WARN] ML model not found, falling back to fingerprint")
+            fingerprint_info = load_chirp_fingerprint(config)
+            classifier_info = fingerprint_info
+    else:
+        fingerprint_info = load_chirp_fingerprint(config)
+        classifier_info = fingerprint_info
     
     print("=" * 60)
     print("NOISE DETECTOR - Starting Monitor")
@@ -474,16 +491,25 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
     print(f"Clips Directory: {Path(event_clips['clips_dir']).resolve()}")
     print(f"Baseline Threshold: +{event_detection['threshold_above_baseline_db']:.1f} dB")
     print(f"Min Event Duration: {event_detection['min_event_duration_sec']:.1f}s")
-    if fingerprint_info:
-        print(f"Chirp Classification: ENABLED (threshold: {config['chirp_classification']['similarity_threshold']:.2f})")
+    if classifier_info:
+        if use_ml and ml_model_info:
+            print("Chirp Classification: ENABLED (ML Model)")
+        elif fingerprint_info:
+            print(f"Chirp Classification: ENABLED (Fingerprint, threshold: {chirp_cfg['similarity_threshold']:.2f})")
+        else:
+            print("Chirp Classification: DISABLED")
     else:
-        print("Chirp Classification: DISABLED (no fingerprint)")
+        print("Chirp Classification: DISABLED (no classifier)")
     print("=" * 60)
     print("Press Ctrl+C to stop.\n")
-    if fingerprint_info is None:
-        print("[WARN] Chirp classification disabled - no fingerprint file found")
-        print(f"  Expected: {config['chirp_classification']['fingerprint_file']}")
-        print("  Run 'make train' to create fingerprint from training samples")
+    if classifier_info is None:
+        print("[WARN] Chirp classification disabled - no classifier found")
+        if use_ml:
+            print("  Expected ML model files in data/")
+            print("  Run 'make train-ml' to create ML model")
+        else:
+            print(f"  Expected: {chirp_cfg['fingerprint_file']}")
+            print("  Run 'make train' to create fingerprint from training samples")
 
     try:
         proc = start_arecord(config)
@@ -675,7 +701,8 @@ def run_monitor(config_path: Optional[Path] = None, debug: bool = False):
                             if actual_event_chunks:
                                 try:
                                     is_chirp, similarity, confidence, rejection_reason = classify_event_is_chirp(
-                                        actual_event_chunks, fingerprint_info, duration_sec, config
+                                        actual_event_chunks, classifier_info, duration_sec, config,
+                                        use_ml=use_ml, ml_model_info=ml_model_info
                                     )
                                 except Exception as e:
                                     # Classification failed - log error but continue
@@ -844,6 +871,28 @@ def load_chirp_fingerprint(config: Dict[str, Any]):
         return {"fingerprint": fp, "sample_rate": sr, "fft_size": fft_size}
     except Exception as e:
         print(f"[WARN] Failed to load chirp fingerprint: {e}")
+        return None
+
+
+def load_chirp_ml_model(config: Dict[str, Any]):
+    """Load ML model for chirp classification."""
+    try:
+        import joblib
+        from scripts.classify_chirp_ml import load_ml_model
+        
+        ml_model_info = load_ml_model(config)
+        if ml_model_info is None:
+            return None
+        
+        model, scaler, metadata = ml_model_info
+        print(f"[INFO] Loaded ML model: {metadata.get('model_type', 'unknown')} "
+              f"(train_acc={metadata.get('metrics', {}).get('train_accuracy', 0):.3f})")
+        return ml_model_info
+    except ImportError:
+        print("[WARN] scikit-learn not available - ML classification disabled")
+        return None
+    except Exception as e:
+        print(f"[WARN] Failed to load ML model: {e}")
         return None
 
 
@@ -1136,57 +1185,79 @@ def find_best_chirp_segment(
     return best_chunks, best_similarity, None
 
 
-def classify_event_is_chirp(
-    event_chunks: List[bytes], 
-    fingerprint_info: Optional[Dict[str, Any]], 
+def classify_event_is_chirp_ml(
+    event_chunks: List[bytes],
+    ml_model_info: Tuple,
     duration_sec: float,
     config: Dict[str, Any]
 ) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
     """
-    Classify if event is a chirp using multi-stage filtering.
+    Classify event using ML model.
     
-    This is the core classification function. It uses a sliding window approach
-    to find the best matching segment within the event, then applies multiple
-    filters to distinguish chirps from other sounds.
+    Args:
+        event_chunks: List of raw PCM byte chunks
+        ml_model_info: Tuple from load_chirp_ml_model()
+        duration_sec: Event duration
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (is_chirp, confidence, confidence, None)
+    """
+    try:
+        from scripts.classify_chirp_ml import classify_event_chunks_ml
+        
+        sr = config["audio"]["sample_rate"]
+        is_chirp, confidence, error = classify_event_chunks_ml(event_chunks, sr, ml_model_info)
+        
+        if error:
+            return False, None, None, f"ml_error_{error}"
+        
+        # For ML, we use confidence as both similarity and confidence
+        # (ML gives probability, not similarity)
+        return is_chirp, confidence, confidence, None
+        
+    except Exception as e:
+        return False, None, None, f"ml_exception_{str(e)}"
+
+
+def classify_event_is_chirp(
+    event_chunks: List[bytes], 
+    classifier_info: Optional[Dict[str, Any]], 
+    duration_sec: float,
+    config: Dict[str, Any],
+    use_ml: bool = False,
+    ml_model_info: Optional[Tuple] = None
+) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:
+    """
+    Classify if event is a chirp using either ML model or fingerprint method.
     
-    Classification pipeline:
-        1. Sliding window: Find best segment (handles noise at start, chirp at end)
-        2. Duration check: Reject events > 2.0s (sustained sounds)
-        3. Frequency filtering: Reject fan noise (low-freq) and require high-freq content
-        4. Temporal analysis: Require energy concentration (staccato chirps)
-        5. Spectral similarity: Cosine similarity to trained fingerprint
-        6. Confidence scoring: Weighted combination of all factors
+    This is the core classification function. It can use either:
+    - ML model: Trained classifier (Random Forest or SVM)
+    - Fingerprint: Multi-stage filtering with spectral similarity
     
     Args:
         event_chunks: List of raw PCM byte chunks (int16 little-endian)
-        fingerprint_info: Dictionary with fingerprint, sample_rate, fft_size (or None)
+        classifier_info: Dictionary with fingerprint info (for fingerprint method) or None
         duration_sec: Total event duration in seconds
         config: Configuration dictionary
+        use_ml: If True, use ML model instead of fingerprint
+        ml_model_info: ML model info tuple (if use_ml=True)
         
     Returns:
         Tuple of:
             - is_chirp (bool): True if classified as chirp
-            - similarity (float or None): Cosine similarity score (0-1)
-            - confidence (float or None): Combined confidence score (0-1)
+            - similarity (float or None): Similarity/confidence score (0-1)
+            - confidence (float or None): Confidence score (0-1)
             - rejection_reason (str or None): Why it was rejected (if not chirp)
-    
-    Rejection reasons:
-        - "no_fingerprint": Fingerprint file not loaded
-        - "no_valid_segment_*": Sliding window found no good segment
-        - "duration_too_long_*": Event exceeds max duration
-        - "too_much_low_freq_*": Too much energy in fan noise range
-        - "insufficient_high_freq_*": Not enough energy in chirp range
-        - "energy_too_spread_*": Energy not concentrated in first half
-        - "similarity_too_low_*": Similarity below threshold
-        - "spectrum_computation_failed": FFT computation failed
-    
-    Performance notes:
-        - FFT operations are CPU-intensive but only run during events
-        - Sliding window tries 6 different window sizes (minimal overhead)
-        - All filtering uses early exit (rejects as soon as criteria fail)
     """
+    # Use ML model if requested and available
+    if use_ml and ml_model_info is not None:
+        return classify_event_is_chirp_ml(event_chunks, ml_model_info, duration_sec, config)
+    
+    # Fall back to fingerprint method
+    fingerprint_info = classifier_info
     if fingerprint_info is None:
-        return False, None, None, "no_fingerprint"
+        return False, None, None, "no_classifier"
     
     chirp_cfg = config["chirp_classification"]
     freq_cfg = chirp_cfg["frequency_filtering"]

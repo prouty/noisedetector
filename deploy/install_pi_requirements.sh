@@ -38,14 +38,16 @@ if command -v apt-get &> /dev/null; then
         python3 -m pip install --no-cache-dir \
             "pytz>=2024.1" \
             "six>=1.16.0" \
-            "tzdata>=2024.1" || {
+            "tzdata>=2024.1" \
+            "scikit-learn>=1.3.0,<2.0.0" \
+            "joblib>=1.3.0" || {
             echo "ERROR: Failed to install some dependencies"
             exit 1
         }
         
         echo ""
         echo "Verifying installation..."
-        python3 -c "import numpy; import pandas; import bottleneck; print(f'✓ numpy {numpy.__version__}'); print(f'✓ pandas {pandas.__version__}'); print(f'✓ bottleneck {bottleneck.__version__}')" || {
+        python3 -c "import numpy; import pandas; import bottleneck; import sklearn; import joblib; print(f'✓ numpy {numpy.__version__}'); print(f'✓ pandas {pandas.__version__}'); print(f'✓ bottleneck {bottleneck.__version__}'); print(f'✓ scikit-learn {sklearn.__version__}'); print(f'✓ joblib {joblib.__version__}')" || {
             echo "ERROR: Import test failed"
             exit 1
         }
@@ -106,14 +108,16 @@ python3 -m pip install --no-cache-dir \
     "python-dateutil>=2.8.0" \
     "pytz>=2024.1" \
     "six>=1.16.0" \
-    "tzdata>=2024.1" || {
+    "tzdata>=2024.1" \
+    "scikit-learn>=1.3.0,<2.0.0" \
+    "joblib>=1.3.0" || {
     echo "ERROR: Failed to install some dependencies"
     exit 1
 }
 
 echo ""
 echo "Verifying installation..."
-python3 -c "import numpy; import pandas; import bottleneck; print(f'✓ numpy {numpy.__version__}'); print(f'✓ pandas {pandas.__version__}'); print(f'✓ bottleneck {bottleneck.__version__}')" || {
+python3 -c "import numpy; import pandas; import bottleneck; import sklearn; import joblib; print(f'✓ numpy {numpy.__version__}'); print(f'✓ pandas {pandas.__version__}'); print(f'✓ bottleneck {bottleneck.__version__}'); print(f'✓ scikit-learn {sklearn.__version__}'); print(f'✓ joblib {joblib.__version__}')" || {
     echo "ERROR: Import test failed"
     exit 1
 }

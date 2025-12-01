@@ -36,6 +36,8 @@ def get_default_config() -> Dict[str, Any]:
         },
         "chirp_classification": {
             "fingerprint_file": "data/chirp_fingerprint.json",
+            "use_ml_classifier": False,  # Set to True to use ML model instead of fingerprint
+            "ml_metadata_file": "data/chirp_model_metadata.json",  # ML model metadata
             "similarity_threshold": 0.8,
             "frequency_filtering": {
                 "fan_noise_max_freq_hz": 500,

@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps train deploy deploy-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
+.PHONY: pull pull-chirps train train-ml train-ml-svm deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow
 
 pull:
 	@echo "==> Pulling events.csv and clips from Pi..."
@@ -32,9 +32,21 @@ pull-chirps:
 	fi
 	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/chirp_clips.txt
 
+test-ml:
+	@echo "==> Testing ML model on training data..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/test_chirp_ml.py --training
+
 train:
 	@echo "==> Training chirp fingerprint from training/chirp/*.wav..."
 	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_fingerprint.py
+
+train-ml:
+	@echo "==> Training ML model for chirp classification..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_ml.py
+
+train-ml-svm:
+	@echo "==> Training SVM model for chirp classification..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_ml.py --model-type svm
 
 deploy:
 	@echo "==> Deploying chirp_fingerprint.json to Pi..."
@@ -42,8 +54,17 @@ deploy:
 	@echo "==> Note: Service restart required for new fingerprint to take effect"
 	@echo "==> Run 'make restart' to restart the service"
 
+deploy-ml:
+	@echo "==> Deploying ML model files to Pi..."
+	rsync -avz $(LOCAL_DIR)/data/chirp_model.pkl $(LOCAL_DIR)/data/chirp_scaler.pkl $(LOCAL_DIR)/data/chirp_model_metadata.json $(PI_HOST):$(PI_DIR)/data/
+	@echo "==> Note: Service restart required for new model to take effect"
+	@echo "==> Run 'make restart' to restart the service"
+
 deploy-restart: deploy restart
 	@echo "==> Deployed fingerprint and restarted service"
+
+deploy-ml-restart: deploy-ml restart
+	@echo "==> Deployed ML model and restarted service"
 
 reload:
 	@echo "==> Reloading noise-monitor service on Pi..."
@@ -85,6 +106,10 @@ rediagnose:
 
 rediagnose-report: rediagnose report
 	@echo "==> Re-classified events and generated updated report"
+
+compare-classifiers:
+	@echo "==> Comparing ML vs fingerprint classifiers on reviewed events..."
+	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/compare_classifiers.py
 
 audio-check:
 	@echo "==> Stopping noise-monitor service (audio device needed)..."

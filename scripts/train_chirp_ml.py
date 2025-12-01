@@ -1,0 +1,380 @@
+#!/usr/bin/env python3
+"""
+Train a lightweight ML model for chirp classification using MFCC features.
+
+This replaces the simple spectral fingerprinting with a proper ML approach:
+- Extracts MFCC features (more robust than raw spectrum)
+- Trains a Random Forest classifier (fast inference on Pi)
+- Supports incremental learning (can retrain with new examples)
+- Exports to a format that runs efficiently on Raspberry Pi
+
+Usage:
+    python3 scripts/train_chirp_ml.py
+    python3 scripts/train_chirp_ml.py --model-type svm  # Use SVM instead
+"""
+import json
+import wave
+import argparse
+from pathlib import Path
+from typing import List, Tuple, Dict, Optional
+import numpy as np
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.svm import SVC
+from sklearn.preprocessing import StandardScaler
+from sklearn.model_selection import cross_val_score
+import joblib
+
+CHIRP_TRAIN_DIR = Path("training/chirp")
+NON_CHIRP_TRAIN_DIR = Path("training/not_chirp")
+OUTPUT_DIR = Path("data")
+MODEL_FILE = OUTPUT_DIR / "chirp_model.pkl"
+SCALER_FILE = OUTPUT_DIR / "chirp_scaler.pkl"
+METADATA_FILE = OUTPUT_DIR / "chirp_model_metadata.json"
+
+INT16_FULL_SCALE = 32768.0
+
+
+def load_mono_wav(path: Path) -> Tuple[np.ndarray, int]:
+    """Load WAV file as mono float32 array."""
+    with wave.open(str(path), "rb") as wf:
+        nch = wf.getnchannels()
+        sr = wf.getframerate()
+        nframes = wf.getnframes()
+        frames = wf.readframes(nframes)
+    
+    samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
+    
+    if nch > 1:
+        samples = samples.reshape(-1, nch).mean(axis=1)
+    
+    return samples, sr
+
+
+def extract_mfcc_features(samples: np.ndarray, sr: int, n_mfcc: int = 13) -> np.ndarray:
+    """
+    Extract MFCC features from audio samples.
+    
+    MFCCs (Mel-frequency Cepstral Coefficients) are more robust than raw spectrum
+    for audio classification. They capture perceptual characteristics better.
+    
+    Args:
+        samples: Audio samples (float32, -1 to 1)
+        sr: Sample rate
+        n_mfcc: Number of MFCC coefficients (default 13)
+        
+    Returns:
+        Feature vector (mean, std, min, max of MFCCs across time)
+    """
+    # Simple MFCC-like features using FFT and mel-scale approximation
+    # For Pi compatibility, we'll use a lightweight implementation
+    
+    fft_size = 2048
+    hop_size = fft_size // 4
+    
+    if len(samples) < fft_size:
+        # Pad short clips
+        samples = np.pad(samples, (0, fft_size - len(samples)))
+    
+    # Compute STFT
+    window = np.hanning(fft_size)
+    frames = []
+    
+    for start in range(0, len(samples) - fft_size, hop_size):
+        frame = samples[start:start + fft_size] * window
+        fft = np.fft.rfft(frame)
+        magnitude = np.abs(fft)
+        frames.append(magnitude)
+    
+    if not frames:
+        # Fallback for very short clips
+        frame = np.pad(samples, (0, fft_size - len(samples))) * window
+        fft = np.fft.rfft(frame)
+        magnitude = np.abs(fft)
+        frames = [magnitude]
+    
+    frames = np.array(frames)
+    
+    # Apply mel-scale filterbank (simplified)
+    n_mel = 26
+    mel_filters = create_mel_filterbank(sr, fft_size, n_mel)
+    
+    # Apply filters
+    mel_spectrum = np.dot(frames, mel_filters.T)
+    
+    # Log scale
+    mel_spectrum = np.log(mel_spectrum + 1e-10)
+    
+    # DCT to get MFCCs
+    mfccs = dct(mel_spectrum, n_mfcc)
+    
+    # Aggregate across time: mean, std, min, max
+    features = np.concatenate([
+        np.mean(mfccs, axis=0),      # Mean MFCCs
+        np.std(mfccs, axis=0),       # Std MFCCs
+        np.min(mfccs, axis=0),       # Min MFCCs
+        np.max(mfccs, axis=0),       # Max MFCCs
+    ])
+    
+    return features
+
+
+def create_mel_filterbank(sr: int, fft_size: int, n_mel: int) -> np.ndarray:
+    """Create mel-scale filterbank (simplified version)."""
+    n_fft_bins = fft_size // 2 + 1
+    freq_bins = np.arange(n_fft_bins) * sr / fft_size
+    
+    # Mel scale: m = 2595 * log10(1 + f/700)
+    mel_max = 2595 * np.log10(1 + sr / 2 / 700)
+    mel_points = np.linspace(0, mel_max, n_mel + 2)
+    
+    # Convert back to Hz
+    hz_points = 700 * (10 ** (mel_points / 2595) - 1)
+    
+    # Create triangular filters
+    filters = np.zeros((n_mel, n_fft_bins))
+    
+    for i in range(n_mel):
+        start = hz_points[i]
+        center = hz_points[i + 1]
+        end = hz_points[i + 2]
+        
+        for j, freq in enumerate(freq_bins):
+            if start <= freq < center:
+                filters[i, j] = (freq - start) / (center - start)
+            elif center <= freq < end:
+                filters[i, j] = (end - freq) / (end - center)
+    
+    return filters
+
+
+def dct(x: np.ndarray, n_coeffs: int) -> np.ndarray:
+    """Discrete Cosine Transform (Type II)."""
+    N = x.shape[-1]
+    coeffs = np.arange(n_coeffs)
+    n = np.arange(N)
+    
+    # DCT-II: X[k] = sum(x[n] * cos(pi * k * (2n + 1) / (2N)))
+    dct_matrix = np.cos(np.pi * np.outer(coeffs, 2 * n + 1) / (2 * N))
+    
+    # Apply scaling
+    dct_matrix[0] *= 1 / np.sqrt(2)
+    dct_matrix *= np.sqrt(2 / N)
+    
+    return np.dot(x, dct_matrix.T)
+
+
+def extract_additional_features(samples: np.ndarray, sr: int) -> np.ndarray:
+    """Extract additional temporal and spectral features."""
+    features = []
+    
+    # Temporal features
+    rms = np.sqrt(np.mean(samples ** 2))
+    features.append(rms)
+    
+    zero_crossing_rate = np.mean(np.abs(np.diff(np.sign(samples)))) / 2
+    features.append(zero_crossing_rate)
+    
+    # Spectral features
+    fft = np.fft.rfft(samples[:2048] if len(samples) >= 2048 else np.pad(samples, (0, 2048 - len(samples))))
+    magnitude = np.abs(fft)
+    
+    # Spectral centroid
+    freqs = np.arange(len(magnitude)) * sr / (2 * len(magnitude))
+    spectral_centroid = np.sum(freqs * magnitude) / (np.sum(magnitude) + 1e-10)
+    features.append(spectral_centroid / 4000.0)  # Normalize
+    
+    # Spectral rolloff (frequency below which 85% of energy is contained)
+    cumsum = np.cumsum(magnitude)
+    rolloff_idx = np.where(cumsum >= 0.85 * cumsum[-1])[0]
+    spectral_rolloff = freqs[rolloff_idx[0]] if len(rolloff_idx) > 0 else 0
+    features.append(spectral_rolloff / 4000.0)  # Normalize
+    
+    # Energy in frequency bands
+    freq_resolution = sr / (2 * len(magnitude))
+    low_band = int(500 / freq_resolution)
+    mid_band = int(2000 / freq_resolution)
+    
+    total_energy = np.sum(magnitude)
+    if total_energy > 0:
+        low_energy = np.sum(magnitude[:low_band]) / total_energy
+        mid_energy = np.sum(magnitude[low_band:mid_band]) / total_energy
+        high_energy = np.sum(magnitude[mid_band:]) / total_energy
+        features.extend([low_energy, mid_energy, high_energy])
+    else:
+        features.extend([0, 0, 0])
+    
+    return np.array(features)
+
+
+def load_training_data(chirp_dir: Path, non_chirp_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
+    """Load and extract features from training data."""
+    X = []
+    y = []
+    
+    # Load chirps (positive examples)
+    chirp_files = sorted(chirp_dir.glob("chirp_*.wav"))
+    print(f"Loading {len(chirp_files)} chirp examples...")
+    
+    for wav_path in chirp_files:
+        try:
+            samples, sr = load_mono_wav(wav_path)
+            mfcc_features = extract_mfcc_features(samples, sr)
+            additional_features = extract_additional_features(samples, sr)
+            features = np.concatenate([mfcc_features, additional_features])
+            X.append(features)
+            y.append(1)  # Chirp = 1
+        except Exception as e:
+            print(f"Warning: Failed to process {wav_path.name}: {e}")
+            continue
+    
+    # Load non-chirps (negative examples)
+    non_chirp_files = sorted(non_chirp_dir.glob("not_chirp_*.wav"))
+    print(f"Loading {len(non_chirp_files)} non-chirp examples...")
+    
+    for wav_path in non_chirp_files:
+        try:
+            samples, sr = load_mono_wav(wav_path)
+            mfcc_features = extract_mfcc_features(samples, sr)
+            additional_features = extract_additional_features(samples, sr)
+            features = np.concatenate([mfcc_features, additional_features])
+            X.append(features)
+            y.append(0)  # Non-chirp = 0
+        except Exception as e:
+            print(f"Warning: Failed to process {wav_path.name}: {e}")
+            continue
+    
+    if not X:
+        raise ValueError("No training data loaded!")
+    
+    return np.array(X), np.array(y)
+
+
+def train_model(X: np.ndarray, y: np.ndarray, model_type: str = "random_forest") -> Tuple:
+    """Train ML model and return model, scaler, and metrics."""
+    print(f"\nTraining {model_type} model...")
+    
+    # Scale features
+    scaler = StandardScaler()
+    X_scaled = scaler.fit_transform(X)
+    
+    # Train model
+    if model_type == "random_forest":
+        model = RandomForestClassifier(
+            n_estimators=100,
+            max_depth=10,
+            min_samples_split=5,
+            random_state=42,
+            n_jobs=-1
+        )
+    elif model_type == "svm":
+        model = SVC(
+            kernel="rbf",
+            C=1.0,
+            gamma="scale",
+            probability=True,
+            random_state=42
+        )
+    else:
+        raise ValueError(f"Unknown model type: {model_type}")
+    
+    # Train
+    model.fit(X_scaled, y)
+    
+    # Cross-validation score
+    cv_scores = cross_val_score(model, X_scaled, y, cv=5, scoring="accuracy")
+    
+    print(f"✓ Model trained")
+    print(f"  Training accuracy: {model.score(X_scaled, y):.3f}")
+    print(f"  Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+    
+    # Feature importance (for Random Forest)
+    if model_type == "random_forest":
+        importances = model.feature_importances_
+        top_features = np.argsort(importances)[-10:][::-1]
+        print(f"\n  Top 10 most important features:")
+        for idx in top_features:
+            print(f"    Feature {idx}: {importances[idx]:.4f}")
+    
+    return model, scaler, {
+        "train_accuracy": float(model.score(X_scaled, y)),
+        "cv_accuracy_mean": float(cv_scores.mean()),
+        "cv_accuracy_std": float(cv_scores.std()),
+        "n_features": X.shape[1],
+        "n_chirps": int(np.sum(y == 1)),
+        "n_non_chirps": int(np.sum(y == 0)),
+    }
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Train ML model for chirp classification")
+    parser.add_argument("--model-type", choices=["random_forest", "svm"], default="random_forest",
+                       help="Model type to train (default: random_forest)")
+    parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR,
+                       help="Output directory for model files")
+    
+    args = parser.parse_args()
+    
+    print("=" * 60)
+    print("CHIRP ML MODEL TRAINING")
+    print("=" * 60)
+    print()
+    
+    # Ensure output directory exists
+    args.output_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Load training data
+    try:
+        X, y = load_training_data(CHIRP_TRAIN_DIR, NON_CHIRP_TRAIN_DIR)
+        print(f"\n✓ Loaded {len(X)} training examples ({np.sum(y==1)} chirps, {np.sum(y==0)} non-chirps)")
+        print(f"  Feature vector size: {X.shape[1]}")
+    except ValueError as e:
+        print(f"ERROR: {e}")
+        return
+    
+    # Train model
+    try:
+        model, scaler, metrics = train_model(X, y, args.model_type)
+    except Exception as e:
+        print(f"ERROR: Training failed: {e}")
+        import traceback
+        traceback.print_exc()
+        return
+    
+    # Save model and scaler
+    model_path = args.output_dir / MODEL_FILE.name
+    scaler_path = args.output_dir / SCALER_FILE.name
+    metadata_path = args.output_dir / METADATA_FILE.name
+    
+    joblib.dump(model, model_path)
+    joblib.dump(scaler, scaler_path)
+    
+    # Save metadata
+    metadata = {
+        "model_type": args.model_type,
+        "model_file": str(model_path.name),
+        "scaler_file": str(scaler_path.name),
+        "sample_rate": 16000,  # Assumed from config
+        "metrics": metrics,
+        "feature_extraction": "mfcc_plus_temporal",
+    }
+    
+    with metadata_path.open("w") as f:
+        json.dump(metadata, f, indent=2)
+    
+    print()
+    print("=" * 60)
+    print(f"✓ Model saved to {model_path}")
+    print(f"✓ Scaler saved to {scaler_path}")
+    print(f"✓ Metadata saved to {metadata_path}")
+    print()
+    print("Next steps:")
+    print("  1. Test the model: python3 scripts/test_chirp_ml.py --training")
+    print("  2. Compare with fingerprint: make compare-classifiers")
+    print("  3. Deploy to Pi: make deploy-ml-restart")
+    print("  4. Enable ML in config.json: set 'use_ml_classifier': true")
+    print("=" * 60)
+
+
+if __name__ == "__main__":
+    main()
+

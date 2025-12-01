@@ -6,5 +6,6 @@ events.csv
 training/
 clips/
 venv/
+data/
 .DS_Store
 .env

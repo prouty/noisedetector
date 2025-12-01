@@ -36,6 +36,9 @@ rsync -avz \
 	--exclude 'config.json' \
 	--include 'data/' \
 	--include 'data/chirp_fingerprint.json' \
+	--include 'data/chirp_model.pkl' \
+	--include 'data/chirp_scaler.pkl' \
+	--include 'data/chirp_model_metadata.json' \
 	--exclude 'data/baselines' \
 	--exclude 'data/*' \
 	--exclude 'reports' \
