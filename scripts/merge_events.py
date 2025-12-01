@@ -90,13 +90,41 @@ def merge_events_csv(
         stats['local_only'] = len(local_df)
         return stats
     
+    # Remove any 'index' column that might exist (pandas artifact)
+    if 'index' in local_df.columns:
+        local_df = local_df.drop(columns=['index'])
+    if 'index' in remote_df.columns:
+        remote_df = remote_df.drop(columns=['index'])
+    
     # Ensure start_timestamp column exists (required for merging)
+    # If missing, try to use 'index' column or create from index
     if 'start_timestamp' not in local_df.columns:
-        print(f"Error: 'start_timestamp' column not found in local file", file=sys.stderr)
-        return stats
+        # Check if there's an unnamed index that should be start_timestamp
+        if local_df.index.name is None and len(local_df) > 0:
+            # Try to infer from first column if it looks like a timestamp
+            first_col = local_df.columns[0]
+            if 'timestamp' in first_col.lower() or 'time' in first_col.lower():
+                local_df = local_df.rename(columns={first_col: 'start_timestamp'})
+            else:
+                print(f"Error: 'start_timestamp' column not found in local file", file=sys.stderr)
+                return stats
+        else:
+            print(f"Error: 'start_timestamp' column not found in local file", file=sys.stderr)
+            return stats
+    
     if 'start_timestamp' not in remote_df.columns:
-        print(f"Error: 'start_timestamp' column not found in remote file", file=sys.stderr)
-        return stats
+        # Check if there's an unnamed index that should be start_timestamp
+        if remote_df.index.name is None and len(remote_df) > 0:
+            # Try to infer from first column if it looks like a timestamp
+            first_col = remote_df.columns[0]
+            if 'timestamp' in first_col.lower() or 'time' in first_col.lower():
+                remote_df = remote_df.rename(columns={first_col: 'start_timestamp'})
+            else:
+                print(f"Error: 'start_timestamp' column not found in remote file", file=sys.stderr)
+                return stats
+        else:
+            print(f"Error: 'start_timestamp' column not found in remote file", file=sys.stderr)
+            return stats
     
     # Ensure reviewed column exists in both dataframes
     if 'reviewed' not in local_df.columns:
@@ -110,17 +138,38 @@ def merge_events_csv(
     if 'is_chirp' not in remote_df.columns:
         remote_df['is_chirp'] = ''
     
-    # Use start_timestamp as the merge key
-    # Set it as index for easier merging
-    local_df = local_df.set_index('start_timestamp')
-    remote_df = remote_df.set_index('start_timestamp')
+    # Convert start_timestamp to string and filter out invalid values
+    # This ensures consistent types for sorting and prevents errors
+    def clean_timestamp(ts):
+        """Convert timestamp to string, handling NaN and empty values."""
+        if pd.isna(ts):
+            return None
+        ts_str = str(ts).strip()
+        return ts_str if ts_str else None
     
-    # Get all unique timestamps
+    local_df['start_timestamp'] = local_df['start_timestamp'].apply(clean_timestamp)
+    remote_df['start_timestamp'] = remote_df['start_timestamp'].apply(clean_timestamp)
+    
+    # Filter out rows with invalid timestamps
+    local_df = local_df[local_df['start_timestamp'].notna()]
+    remote_df = remote_df[remote_df['start_timestamp'].notna()]
+    
+    # Use start_timestamp as the merge key
+    # Set it as index for easier merging (this will name the index 'start_timestamp')
+    local_df = local_df.set_index('start_timestamp', drop=True)
+    remote_df = remote_df.set_index('start_timestamp', drop=True)
+    
+    # Ensure index name is set correctly (should be 'start_timestamp' after set_index)
+    local_df.index.name = 'start_timestamp'
+    remote_df.index.name = 'start_timestamp'
+    
+    # Get all unique timestamps (all should be strings now)
     all_timestamps = set(local_df.index) | set(remote_df.index)
     
     # Build merged dataframe
     merged_rows = []
     
+    # Sort timestamps (all are strings now, so sorting works)
     for timestamp in sorted(all_timestamps):
         local_row = local_df.loc[timestamp] if timestamp in local_df.index else None
         remote_row = remote_df.loc[timestamp] if timestamp in remote_df.index else None
@@ -158,26 +207,59 @@ def merge_events_csv(
     if merged_rows:
         merged_df = pd.DataFrame(merged_rows)
         # Reset index to make start_timestamp a column again
+        # The index name should be 'start_timestamp', so reset_index will create that column
         merged_df = merged_df.reset_index()
         
-        # Ensure column order matches original (use remote as reference for order)
-        if not remote_df.empty:
-            # Get column order from remote (with start_timestamp first)
-            original_columns = ['start_timestamp'] + [col for col in remote_df.columns if col != 'start_timestamp']
-            # Only use columns that exist in merged_df
-            column_order = [col for col in original_columns if col in merged_df.columns]
-            # Add any extra columns from merged_df
-            extra_cols = [col for col in merged_df.columns if col not in column_order]
-            merged_df = merged_df[column_order + extra_cols]
+        # Remove any 'index' column that might have been created (shouldn't happen, but safety check)
+        if 'index' in merged_df.columns:
+            # If 'index' exists but 'start_timestamp' doesn't, rename it
+            if 'start_timestamp' not in merged_df.columns:
+                merged_df = merged_df.rename(columns={'index': 'start_timestamp'})
+            else:
+                # Both exist - drop the redundant 'index' column
+                merged_df = merged_df.drop(columns=['index'])
+        
+        # Define the correct column order (matching monitor.py ensure_events_header)
+        expected_columns = [
+            'start_timestamp',
+            'end_timestamp',
+            'duration_sec',
+            'max_peak_db',
+            'max_rms_db',
+            'baseline_rms_db',
+            'segment_file',
+            'segment_offset_sec',
+            'clip_file',
+            'is_chirp',
+            'chirp_similarity',
+            'confidence',
+            'rejection_reason',
+            'reviewed'
+        ]
+        
+        # Build column order: expected columns first (in order), then any extras
+        column_order = [col for col in expected_columns if col in merged_df.columns]
+        extra_cols = [col for col in merged_df.columns if col not in column_order]
+        merged_df = merged_df[column_order + extra_cols]
         
         # Save merged result
         merged_df.to_csv(output_file, index=False)
     else:
         # Both files were empty or no rows matched
         if not remote_df.empty:
-            remote_df.reset_index().to_csv(output_file, index=False)
+            result_df = remote_df.reset_index()
+            if 'index' in result_df.columns and 'start_timestamp' not in result_df.columns:
+                result_df = result_df.rename(columns={'index': 'start_timestamp'})
+            elif 'index' in result_df.columns:
+                result_df = result_df.drop(columns=['index'])
+            result_df.to_csv(output_file, index=False)
         elif not local_df.empty:
-            local_df.reset_index().to_csv(output_file, index=False)
+            result_df = local_df.reset_index()
+            if 'index' in result_df.columns and 'start_timestamp' not in result_df.columns:
+                result_df = result_df.rename(columns={'index': 'start_timestamp'})
+            elif 'index' in result_df.columns:
+                result_df = result_df.drop(columns=['index'])
+            result_df.to_csv(output_file, index=False)
     
     return stats
 
