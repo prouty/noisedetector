@@ -13,19 +13,48 @@ LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
 pull:
 	@echo "==> Pulling events.csv and clips (<=10s) from Pi..."
-	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
+	@if [ -f $(LOCAL_DIR)/data/events.csv ]; then \
+		echo "==> Backing up local events.csv..."; \
+		cp $(LOCAL_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.backup; \
+	fi
+	@echo "==> Pulling remote events.csv..."
+	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.remote > /dev/null 2>&1
+	@if [ -f $(LOCAL_DIR)/data/events.csv.remote ]; then \
+		if [ -f $(LOCAL_DIR)/data/events.csv ]; then \
+			echo "==> Merging local and remote events.csv (preserving reviewed status)..."; \
+			cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/merge_events.py \
+				data/events.csv.backup data/events.csv.remote data/events.csv; \
+		else \
+			echo "==> No local events.csv found, using remote as-is..."; \
+			mv $(LOCAL_DIR)/data/events.csv.remote $(LOCAL_DIR)/data/events.csv; \
+		fi; \
+	else \
+		echo "==> Warning: Could not pull remote events.csv"; \
+	fi
 	@echo "==> Filtering clips by duration (<=10s)..."
-	@cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/pull_short_clips.py data/events.csv.tmp > /tmp/short_clips.txt
-	@mv $(LOCAL_DIR)/data/events.csv.tmp $(LOCAL_DIR)/data/events.csv
+	@cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/pull_short_clips.py data/events.csv > /tmp/short_clips.txt
 	@if [ -s /tmp/short_clips.txt ]; then \
-		echo "==> Transferring $$(wc -l < /tmp/short_clips.txt) clips (<=10s)..."; \
-		rsync -avz --files-from=/tmp/short_clips.txt \
-			$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-		echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+		echo "==> Checking which clips exist on Pi (excluding moved/reviewed clips)..."; \
+		> /tmp/existing_clips.txt; \
+		while IFS= read -r clip; do \
+			if ssh $(PI_HOST) "test -f $(PI_DIR)/clips/$$clip" 2>/dev/null; then \
+				echo "$$clip" >> /tmp/existing_clips.txt; \
+			fi; \
+		done < /tmp/short_clips.txt; \
+		if [ -s /tmp/existing_clips.txt ]; then \
+			echo "==> Transferring $$(wc -l < /tmp/existing_clips.txt) clips (<=10s)..."; \
+			rsync -avz --files-from=/tmp/existing_clips.txt \
+				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+			echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+		else \
+			echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
+		fi; \
+		rm -f /tmp/existing_clips.txt; \
 	else \
 		echo "==> No clips <=10s found in events.csv"; \
 	fi
-	@rm -f /tmp/short_clips.txt
+	@rm -f $(LOCAL_DIR)/data/events.csv.remote /tmp/short_clips.txt
+	@echo "==> Backup saved to $(LOCAL_DIR)/data/events.csv.backup (delete manually if not needed)"
 
 pull-chirps:
 	@echo "==> Pulling events.csv to identify chirps..."
