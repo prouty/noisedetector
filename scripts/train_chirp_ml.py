@@ -246,7 +246,35 @@ def load_training_data(chirp_dir: Path, non_chirp_dir: Path) -> Tuple[np.ndarray
     if not X:
         raise ValueError("No training data loaded!")
     
-    return np.array(X), np.array(y)
+    X_array = np.array(X)
+    y_array = np.array(y)
+    
+    # Check minimum requirements
+    n_samples = len(X_array)
+    n_chirps = int(np.sum(y_array == 1))
+    n_non_chirps = int(np.sum(y_array == 0))
+    
+    if n_samples < 2:
+        raise ValueError(
+            f"Insufficient training data: Only {n_samples} sample(s) available.\n"
+            f"  Need at least 2 samples (ideally 10+ for good results).\n"
+            f"  Current: {n_chirps} chirp(s), {n_non_chirps} non-chirp(s)\n"
+            f"  Add more examples to:\n"
+            f"    - training/chirp/chirp_*.wav (for chirp examples)\n"
+            f"    - training/not_chirp/not_chirp_*.wav (for non-chirp examples)"
+        )
+    
+    if n_chirps == 0:
+        raise ValueError(
+            "No chirp examples found! Need at least 1 chirp example in training/chirp/chirp_*.wav"
+        )
+    
+    if n_non_chirps == 0:
+        print(f"\n⚠️  WARNING: No non-chirp examples found in training/not_chirp/")
+        print(f"  Model will only learn what chirps look like, not what to reject")
+        print(f"  Recommendation: Add non-chirp examples for better accuracy")
+    
+    return X_array, y_array
 
 
 def train_model(X: np.ndarray, y: np.ndarray, model_type: str = "random_forest") -> Tuple:
@@ -277,15 +305,39 @@ def train_model(X: np.ndarray, y: np.ndarray, model_type: str = "random_forest")
     else:
         raise ValueError(f"Unknown model type: {model_type}")
     
+    # Check if we have enough samples for cross-validation
+    n_samples = len(X)
+    min_samples_for_cv = 5
+    
+    if n_samples < min_samples_for_cv:
+        print(f"\n⚠️  WARNING: Only {n_samples} training sample(s) available")
+        print(f"  Cross-validation requires at least {min_samples_for_cv} samples")
+        print(f"  Model will be trained but accuracy metrics will be limited")
+        print(f"  Recommendation: Add more training examples to training/chirp/ and training/not_chirp/")
+        print(f"    - Need at least {min_samples_for_cv - n_samples} more example(s)")
+        if n_samples == 1:
+            print(f"    - With only 1 sample, the model will always predict that class")
+            print(f"    - This is not useful for classification - please add more training data")
+    
     # Train
     model.fit(X_scaled, y)
     
-    # Cross-validation score
-    cv_scores = cross_val_score(model, X_scaled, y, cv=5, scoring="accuracy")
+    # Cross-validation score (only if we have enough samples)
+    train_accuracy = model.score(X_scaled, y)
     
-    print(f"✓ Model trained")
-    print(f"  Training accuracy: {model.score(X_scaled, y):.3f}")
-    print(f"  Cross-validation accuracy: {cv_scores.mean():.3f} (+/- {cv_scores.std() * 2:.3f})")
+    if n_samples >= min_samples_for_cv:
+        cv_scores = cross_val_score(model, X_scaled, y, cv=min(5, n_samples), scoring="accuracy")
+        cv_mean = cv_scores.mean()
+        cv_std = cv_scores.std() * 2
+        print(f"\n✓ Model trained")
+        print(f"  Training accuracy: {train_accuracy:.3f}")
+        print(f"  Cross-validation accuracy: {cv_mean:.3f} (+/- {cv_std:.3f})")
+    else:
+        print(f"\n✓ Model trained (with limited validation)")
+        print(f"  Training accuracy: {train_accuracy:.3f}")
+        print(f"  Cross-validation: Skipped (need {min_samples_for_cv} samples, have {n_samples})")
+        cv_mean = train_accuracy
+        cv_std = 0.0
     
     # Feature importance (for Random Forest)
     if model_type == "random_forest":
@@ -295,14 +347,24 @@ def train_model(X: np.ndarray, y: np.ndarray, model_type: str = "random_forest")
         for idx in top_features:
             print(f"    Feature {idx}: {importances[idx]:.4f}")
     
-    return model, scaler, {
-        "train_accuracy": float(model.score(X_scaled, y)),
-        "cv_accuracy_mean": float(cv_scores.mean()),
-        "cv_accuracy_std": float(cv_scores.std()),
-        "n_features": X.shape[1],
+    # Build metrics dictionary
+    metrics = {
+        "train_accuracy": float(train_accuracy),
+        "n_features": int(X.shape[1]),
+        "n_samples": int(n_samples),
         "n_chirps": int(np.sum(y == 1)),
         "n_non_chirps": int(np.sum(y == 0)),
     }
+    
+    if n_samples >= min_samples_for_cv:
+        metrics["cv_accuracy"] = float(cv_mean)
+        metrics["cv_std"] = float(cv_std)
+    else:
+        metrics["cv_accuracy"] = None
+        metrics["cv_std"] = None
+        metrics["warning"] = f"Insufficient samples for cross-validation (need {min_samples_for_cv}, have {n_samples})"
+    
+    return model, scaler, metrics
 
 
 def main():

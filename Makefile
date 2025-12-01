@@ -22,7 +22,7 @@ pull:
 	@if [ -f $(LOCAL_DIR)/data/events.csv.remote ]; then \
 		if [ -f $(LOCAL_DIR)/data/events.csv ]; then \
 			echo "==> Merging local and remote events.csv (preserving reviewed status)..."; \
-			cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/merge_events.py \
+			cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/merge_events.py \
 				data/events.csv.backup data/events.csv.remote data/events.csv; \
 		else \
 			echo "==> No local events.csv found, using remote as-is..."; \
@@ -32,24 +32,47 @@ pull:
 		echo "==> Warning: Could not pull remote events.csv"; \
 	fi
 	@echo "==> Filtering clips by duration (<=10s)..."
-	@cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/pull_short_clips.py data/events.csv > /tmp/short_clips.txt
+	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_short_clips.py data/events.csv > /tmp/short_clips.txt
 	@if [ -s /tmp/short_clips.txt ]; then \
 		echo "==> Checking which clips exist on Pi (excluding moved/reviewed clips)..."; \
-		> /tmp/existing_clips.txt; \
-		while IFS= read -r clip; do \
-			if ssh $(PI_HOST) "test -f $(PI_DIR)/clips/$$clip" 2>/dev/null; then \
-				echo "$$clip" >> /tmp/existing_clips.txt; \
-			fi; \
-		done < /tmp/short_clips.txt; \
-		if [ -s /tmp/existing_clips.txt ]; then \
-			echo "==> Transferring $$(wc -l < /tmp/existing_clips.txt) clips (<=10s)..."; \
-			rsync -avz --files-from=/tmp/existing_clips.txt \
-				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-			echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+		total_clips=$$(wc -l < /tmp/short_clips.txt | tr -d ' '); \
+		echo "  Found $$total_clips clips in events.csv (<=10s)"; \
+		if ! ssh $(PI_HOST) "test -d $(PI_DIR)/clips" 2>/dev/null; then \
+			echo "  [ERROR] Clips directory not found on Pi: $(PI_DIR)/clips"; \
+			echo "  Check PI_HOST and PI_DIR settings"; \
 		else \
-			echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
+			> /tmp/existing_clips.txt; \
+			found_count=0; \
+			checked_count=0; \
+			while IFS= read -r clip || [ -n "$$clip" ]; do \
+				clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+				echo "Checking clip: $(PI_DIR)/clips/$$clip"; \
+				if [ -z "$$clip" ]; then continue; fi; \
+				checked_count=$$((checked_count + 1)); \
+				ssh_result=$$(ssh $(PI_HOST) "test -f $(PI_DIR)/clips/$$clip && echo 'EXISTS' || echo 'NOT_FOUND'" 2>/dev/null); \
+				if [ "$$ssh_result" = "EXISTS" ]; then \
+					echo "$$clip" >> /tmp/existing_clips.txt; \
+					found_count=$$((found_count + 1)); \
+				fi; \
+			done < /tmp/short_clips.txt; \
+			echo "  Checked $$checked_count clips, found $$found_count on Pi"; \
+			if [ $$found_count -gt 0 ]; then \
+				echo "  Verifying /tmp/existing_clips.txt has $$found_count lines..."; \
+				file_lines=$$(wc -l < /tmp/existing_clips.txt | tr -d ' '); \
+				echo "  File actually contains $$file_lines lines"; \
+			fi; \
+			if [ -s /tmp/existing_clips.txt ]; then \
+				echo "  Found $$found_count clips on Pi"; \
+				echo "==> Transferring $$found_count clips (<=10s)..."; \
+				rsync -avz --files-from=/tmp/existing_clips.txt \
+					$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+				echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+			else \
+				echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
+				echo "  Checked $$total_clips clips from events.csv"; \
+			fi; \
+			rm -f /tmp/existing_clips.txt; \
 		fi; \
-		rm -f /tmp/existing_clips.txt; \
 	else \
 		echo "==> No clips <=10s found in events.csv"; \
 	fi
@@ -60,7 +83,7 @@ pull-chirps:
 	@echo "==> Pulling events.csv to identify chirps..."
 	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
 	@echo "==> Extracting chirp clip filenames..."
-	@cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/pull_chirps.py data/events.csv.tmp > /tmp/chirp_clips.txt
+	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_chirps.py data/events.csv.tmp > /tmp/chirp_clips.txt
 	@if [ -s /tmp/chirp_clips.txt ]; then \
 		echo "==> Transferring $$(wc -l < /tmp/chirp_clips.txt) chirp clips..."; \
 		rsync -avz --files-from=/tmp/chirp_clips.txt \
@@ -73,31 +96,31 @@ pull-chirps:
 
 test-ml:
 	@echo "==> Testing ML model on training data..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/test_chirp_ml.py --training
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/test_chirp_ml.py --training
 
 train:
 	@echo "==> Training chirp fingerprint from training/chirp/*.wav..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_fingerprint.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/train_chirp_fingerprint.py
 
 train-ml:
 	@echo "==> Training ML model for chirp classification..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_ml.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/train_chirp_ml.py
 
 train-capture-ml:
 	@echo "==> Training ML model for capture decision..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_capture_ml.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/train_capture_ml.py
 
 test:
 	@echo "==> Running all tests..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && pytest tests/ -v
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/ -v
 
 test-capture-ml:
 	@echo "==> Running ML capture validation tests..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && pytest tests/test_capture_ml.py -v
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_capture_ml.py -v
 
 train-ml-svm:
 	@echo "==> Training SVM model for chirp classification..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/train_chirp_ml.py --model-type svm
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/train_chirp_ml.py --model-type svm
 
 deploy:
 	@echo "==> Deploying chirp_fingerprint.json to Pi..."
@@ -149,18 +172,18 @@ fix-deps:
 
 report:
 	@echo "==> Generating chirp report from events.csv..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/generate_chirp_report.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/generate_chirp_report.py
 
 rediagnose:
 	@echo "==> Re-classifying all events in events.csv..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/rediagnose_events.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/rediagnose_events.py
 
 rediagnose-report: rediagnose report
 	@echo "==> Re-classified events and generated updated report"
 
 compare-classifiers:
 	@echo "==> Comparing ML vs fingerprint classifiers on reviewed events..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/compare_classifiers.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/compare_classifiers.py
 
 mark-chirp:
 	@echo "==> Marking clip as valid chirp..."
@@ -170,11 +193,11 @@ mark-chirp:
 		echo "Error: CLIP not set. Example: make mark-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"; \
 		exit 1; \
 	fi
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --chirp --clip "$(CLIP)"
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/mark_clip.py --chirp --clip "$(CLIP)"
 
 mark-chirp-latest:
 	@echo "==> Marking latest unreviewed event as valid chirp..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --chirp --from-events
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/mark_clip.py --chirp --from-events
 
 mark-not-chirp:
 	@echo "==> Marking clip as not chirp..."
@@ -184,11 +207,11 @@ mark-not-chirp:
 		echo "Error: CLIP not set. Example: make mark-not-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav"; \
 		exit 1; \
 	fi
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --clip "$(CLIP)"
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --clip "$(CLIP)"
 
 mark-not-chirp-latest:
 	@echo "==> Marking latest unreviewed event as not chirp..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --from-events
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --from-events
 
 audio-check:
 	@echo "==> Stopping noise-monitor service (audio device needed)..."
@@ -200,11 +223,11 @@ audio-check:
 
 chirps:
 	@echo "==> Checking for detected chirps..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/check_chirps.py
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/check_chirps.py
 
 chirps-recent:
 	@echo "==> Checking for recent chirps (last 24 hours)..."
-	cd $(LOCAL_DIR) && source venv/bin/activate && python3 scripts/check_chirps.py --recent 24
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/check_chirps.py --recent 24
 
 health:
 	@echo "==> Running system health check on Pi..."
@@ -224,9 +247,17 @@ baseline-create:
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl stop noise-monitor' || true
 	@echo "==> Collecting baseline data for '$(NAME)'..."
 	@if [ -n "$(DESC)" ]; then \
-		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(or $(DURATION),10) --description "$(DESC)"'; \
+		if [ -n "$(DURATION)" ]; then \
+			ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(DURATION) --description "$(DESC)"'; \
+		else \
+			ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration 10 --description "$(DESC)"'; \
+		fi; \
 	else \
-		ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(or $(DURATION),10)'; \
+		if [ -n "$(DURATION)" ]; then \
+			ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration $(DURATION)'; \
+		else \
+			ssh $(PI_HOST) 'cd $(PI_DIR) && python3 baseline.py create "$(NAME)" --duration 10'; \
+		fi; \
 	fi
 	@echo "==> Restarting noise-monitor service..."
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl start noise-monitor'
@@ -307,7 +338,7 @@ init:
 
 shell:
 	@echo "==> Activating virtual environment and starting zsh locally..."
-	@source venv/bin/activate && exec zsh
+	@. venv/bin/activate && exec zsh
 
 email-report:
 	@echo "==> Running email report on Pi..."
