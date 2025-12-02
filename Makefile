@@ -41,37 +41,37 @@ pull:
 			echo "  [ERROR] Clips directory not found on Pi: $(PI_DIR)/clips"; \
 			echo "  Check PI_HOST and PI_DIR settings"; \
 		else \
-			> /tmp/existing_clips.txt; \
-			found_count=0; \
-			checked_count=0; \
-			while IFS= read -r clip || [ -n "$$clip" ]; do \
-				clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
-				echo "Checking clip: $(PI_DIR)/clips/$$clip"; \
-				if [ -z "$$clip" ]; then continue; fi; \
-				checked_count=$$((checked_count + 1)); \
-				ssh_result=$$(ssh $(PI_HOST) "test -f $(PI_DIR)/clips/$$clip && echo 'EXISTS' || echo 'NOT_FOUND'" 2>/dev/null); \
-				if [ "$$ssh_result" = "EXISTS" ]; then \
-					echo "$$clip" >> /tmp/existing_clips.txt; \
-					found_count=$$((found_count + 1)); \
-				fi; \
-			done < /tmp/short_clips.txt; \
-			echo "  Checked $$checked_count clips, found $$found_count on Pi"; \
-			if [ $$found_count -gt 0 ]; then \
-				echo "  Verifying /tmp/existing_clips.txt has $$found_count lines..."; \
-				file_lines=$$(wc -l < /tmp/existing_clips.txt | tr -d ' '); \
-				echo "  File actually contains $$file_lines lines"; \
-			fi; \
-			if [ -s /tmp/existing_clips.txt ]; then \
-				echo "  Found $$found_count clips on Pi"; \
-				echo "==> Transferring $$found_count clips (<=10s)..."; \
-				rsync -avz --files-from=/tmp/existing_clips.txt \
-					$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-				echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+			echo "==> Filtering out clips that already exist locally..."; \
+			cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/filter_existing_clips.py < /tmp/short_clips.txt > /tmp/new_clips.txt 2> /tmp/filter_summary.txt; \
+			if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
+			if [ ! -s /tmp/new_clips.txt ]; then \
+				echo "==> All clips already exist locally (in clips/, training/review/, training/chirp/, or training/not_chirp/)"; \
+				rm -f /tmp/new_clips.txt; \
 			else \
-				echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
-				echo "  Checked $$total_clips clips from events.csv"; \
+				> /tmp/existing_clips.txt; \
+				found_count=0; \
+				checked_count=0; \
+				while IFS= read -r clip || [ -n "$$clip" ]; do \
+					clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+					if [ -z "$$clip" ]; then continue; fi; \
+					checked_count=$$((checked_count + 1)); \
+					ssh_result=$$(ssh $(PI_HOST) "test -f $(PI_DIR)/clips/$$clip && echo 'EXISTS' || echo 'NOT_FOUND'" 2>/dev/null); \
+					if [ "$$ssh_result" = "EXISTS" ]; then \
+						echo "$$clip" >> /tmp/existing_clips.txt; \
+						found_count=$$((found_count + 1)); \
+					fi; \
+				done < /tmp/new_clips.txt; \
+				echo "  Checked $$checked_count new clips, found $$found_count on Pi"; \
+				if [ -s /tmp/existing_clips.txt ]; then \
+					echo "==> Transferring $$found_count clips (<=10s)..."; \
+					rsync -avz --files-from=/tmp/existing_clips.txt \
+						$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+					echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+				else \
+					echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
+				fi; \
+				rm -f /tmp/existing_clips.txt /tmp/new_clips.txt /tmp/filter_summary.txt; \
 			fi; \
-			rm -f /tmp/existing_clips.txt; \
 		fi; \
 	else \
 		echo "==> No clips <=10s found in events.csv"; \
@@ -85,10 +85,19 @@ pull-chirps:
 	@echo "==> Extracting chirp clip filenames..."
 	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_chirps.py data/events.csv.tmp > /tmp/chirp_clips.txt
 	@if [ -s /tmp/chirp_clips.txt ]; then \
-		echo "==> Transferring $$(wc -l < /tmp/chirp_clips.txt) chirp clips..."; \
-		rsync -avz --files-from=/tmp/chirp_clips.txt \
-			$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-		echo "==> Done! Chirp clips saved to $(LOCAL_DIR)/clips/"; \
+		echo "==> Filtering out clips that already exist locally..."; \
+		cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/filter_existing_clips.py < /tmp/chirp_clips.txt > /tmp/new_chirp_clips.txt 2> /tmp/filter_summary.txt; \
+		if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
+		if [ ! -s /tmp/new_chirp_clips.txt ]; then \
+			echo "==> All chirp clips already exist locally (in clips/, training/review/, training/chirp/, or training/not_chirp/)"; \
+		else \
+			new_count=$$(wc -l < /tmp/new_chirp_clips.txt | tr -d ' '); \
+			echo "==> Transferring $$new_count new chirp clips..."; \
+			rsync -avz --files-from=/tmp/new_chirp_clips.txt \
+				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+			echo "==> Done! Chirp clips saved to $(LOCAL_DIR)/clips/"; \
+		fi; \
+		rm -f /tmp/new_chirp_clips.txt /tmp/filter_summary.txt; \
 	else \
 		echo "==> No chirps found in events.csv"; \
 	fi
