@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml
+.PHONY: pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml
 
 pull:
 	@echo "==> Pulling events.csv and clips (<=10s) from Pi..."
@@ -102,6 +102,31 @@ pull-chirps:
 		echo "==> No chirps found in events.csv"; \
 	fi
 	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/chirp_clips.txt
+
+pull-not-chirps:
+	@echo "==> Pulling events.csv to identify non-chirps..."
+	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
+	@echo "==> Extracting non-chirp clip filenames (<=10s)..."
+	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_not_chirps.py data/events.csv.tmp --max-duration 10.0 > /tmp/not_chirp_clips.txt
+	@mkdir -p $(LOCAL_DIR)/training/not_chirp
+	@if [ -s /tmp/not_chirp_clips.txt ]; then \
+		echo "==> Filtering out clips that already exist locally..."; \
+		cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/filter_existing_clips.py < /tmp/not_chirp_clips.txt > /tmp/new_not_chirp_clips.txt 2> /tmp/filter_summary.txt; \
+		if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
+		if [ ! -s /tmp/new_not_chirp_clips.txt ]; then \
+			echo "==> All non-chirp clips already exist locally (in clips/, training/review/, training/chirp/, or training/not_chirp/)"; \
+		else \
+			new_count=$$(wc -l < /tmp/new_not_chirp_clips.txt | tr -d ' '); \
+			echo "==> Transferring $$new_count new non-chirp clips to training/not_chirp/..."; \
+			rsync -avz --files-from=/tmp/new_not_chirp_clips.txt \
+				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/training/not_chirp/; \
+			echo "==> Done! Non-chirp clips saved to $(LOCAL_DIR)/training/not_chirp/"; \
+		fi; \
+		rm -f /tmp/new_not_chirp_clips.txt /tmp/filter_summary.txt; \
+	else \
+		echo "==> No non-chirps found in events.csv"; \
+	fi
+	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/not_chirp_clips.txt
 
 test-ml:
 	@echo "==> Testing ML model on training data..."
@@ -221,6 +246,78 @@ mark-not-chirp:
 mark-not-chirp-latest:
 	@echo "==> Marking latest unreviewed event as not chirp..."
 	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/mark_clip.py --not-chirp --from-events
+
+evaluate:
+	@echo "==> Evaluating audio clips..."
+	@echo "Usage: make evaluate FILES=\"clips/clip1.wav clips/clip2.wav clips/clip3.wav\""
+	@if [ -z "$(FILES)" ]; then \
+		echo "Error: FILES not set. Example: make evaluate FILES=\"clips/clip1.wav clips/clip2.wav\""; \
+		exit 1; \
+	fi
+	@chirp_count=0; \
+	not_chirp_count=0; \
+	error_count=0; \
+	total=0; \
+	for clip in $(FILES); do \
+		total=$$((total + 1)); \
+		echo ""; \
+		echo "==========================================="; \
+		echo "Clip $$total: $$clip"; \
+		echo "==========================================="; \
+		if [ ! -f "$$clip" ]; then \
+			echo "ERROR: File not found: $$clip"; \
+			error_count=$$((error_count + 1)); \
+			continue; \
+		fi; \
+		echo "Playing audio..."; \
+		if ! play "$$clip" > /dev/null 2>&1; then \
+			echo "ERROR: Failed to play $$clip (is 'play' command available?)"; \
+			error_count=$$((error_count + 1)); \
+			continue; \
+		fi; \
+		while true; do \
+			echo ""; \
+			printf "[C]hirp or [N]o Chirp? "; \
+			read -r response < /dev/tty || read -r response; \
+			case "$$response" in \
+				[Cc]) \
+					echo "Marking as chirp..."; \
+					if $(MAKE) -s mark-chirp CLIP="$$clip" > /dev/null 2>&1; then \
+						chirp_count=$$((chirp_count + 1)); \
+						echo "✓ Marked as chirp"; \
+					else \
+						error_count=$$((error_count + 1)); \
+						echo "✗ Failed to mark as chirp"; \
+					fi; \
+					break; \
+					;; \
+				[Nn]) \
+					echo "Marking as not chirp..."; \
+					if $(MAKE) -s mark-not-chirp CLIP="$$clip" > /dev/null 2>&1; then \
+						not_chirp_count=$$((not_chirp_count + 1)); \
+						echo "✓ Marked as not chirp"; \
+					else \
+						error_count=$$((error_count + 1)); \
+						echo "✗ Failed to mark as not chirp"; \
+					fi; \
+					break; \
+					;; \
+				*) \
+					echo "Invalid input. Please type 'C' or 'c' for Chirp, 'N' or 'n' for No Chirp."; \
+					;; \
+			esac; \
+		done; \
+	done; \
+	echo ""; \
+	echo "==========================================="; \
+	echo "Evaluation Complete"; \
+	echo "==========================================="; \
+	echo "Total clips: $$total"; \
+	echo "  Chirps: $$chirp_count"; \
+	echo "  Not Chirps: $$not_chirp_count"; \
+	if [ $$error_count -gt 0 ]; then \
+		echo "  Errors: $$error_count"; \
+	fi
 
 audio-check:
 	@echo "==> Stopping noise-monitor service (audio device needed)..."

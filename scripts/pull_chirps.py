@@ -19,6 +19,13 @@ def get_chirp_clips(events_file: Path) -> list:
     if "is_chirp" not in df.columns or "clip_file" not in df.columns:
         return []
     
+    # Filter out reviewed clips (skip if reviewed is YES or TRUE)
+    if "reviewed" in df.columns:
+        df = df[
+            (df["reviewed"].astype(str).str.upper() != "YES") &
+            (df["reviewed"].astype(str).str.upper() != "TRUE")
+        ]
+    
     # Filter to chirps
     chirps = df[df["is_chirp"].astype(str).str.upper() == "TRUE"]
     

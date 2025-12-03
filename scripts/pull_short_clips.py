@@ -24,6 +24,13 @@ def get_short_clips(events_file: Path, max_duration_sec: float = 10.0) -> list:
     if df.empty:
         return []
     
+    # Filter out reviewed clips (skip if reviewed is YES or TRUE)
+    if "reviewed" in df.columns:
+        df = df[
+            (df["reviewed"].astype(str).str.upper() != "YES") &
+            (df["reviewed"].astype(str).str.upper() != "TRUE")
+        ]
+    
     # Filter by duration
     if "duration_sec" not in df.columns:
         print("Warning: No duration_sec column found", file=sys.stderr)
