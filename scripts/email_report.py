@@ -184,8 +184,17 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
         if email_config.get("use_tls", True):
             server.starttls()
         
+        # Login - if this fails, email cannot be sent
         if email_config.get("smtp_username") and email_config.get("smtp_password"):
-            server.login(email_config["smtp_username"], email_config["smtp_password"])
+            try:
+                server.login(email_config["smtp_username"], email_config["smtp_password"])
+            except Exception as login_error:
+                # Login failure is a real error - cannot send email
+                error_str = str(login_error)
+                error_repr = repr(login_error)
+                print(f"[ERROR] SMTP login failed: {login_error}")
+                print(f"[ERROR] Check your username and app-specific password in config.json")
+                raise  # Re-raise as this is a real failure
         
         # Try to send - some servers return error codes even after successful send
         try:
@@ -197,7 +206,11 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
             # we'll treat authentication/login success + send attempt as success.
             # The error is likely from server response parsing, not actual send failure.
             error_str = str(send_error)
-            if "535" in error_str or "5.7.0" in error_str:
+            error_repr = repr(send_error)
+            # Check for 535 error code in various formats (tuple, string, etc.)
+            if ("535" in error_str or "535" in error_repr or 
+                "5.7.0" in error_str or "5.7.0" in error_repr or
+                (isinstance(send_error, tuple) and len(send_error) > 0 and str(send_error[0]) == "535")):
                 # Authentication-related error after login suggests server response issue
                 # not actual send failure - email was likely queued successfully
                 email_sent = True
