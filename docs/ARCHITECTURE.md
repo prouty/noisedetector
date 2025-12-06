@@ -40,14 +40,14 @@ Logging → events.csv
 - Removes DC offset (hardware artifact)
 - Calculates RMS and peak for each chunk
 
-### 3. Baseline Tracking
+### 3. Baseline Tracking (`core/baseline.py::BaselineTracker`)
 
 - **Initial baseline:** Loaded from `baseline.json` (if exists)
 - **Rolling baseline:** 20th percentile of last 120 chunks (~60s)
 - **Why 20th percentile?** Ignores occasional spikes, captures true quiet level
-- **State:** Stored in `baseline_window` list, updated only when not in event
+- **State:** Managed by `BaselineTracker` class, updated only when not in event
 
-### 4. Event Detection State Machine
+### 4. Event Detection State Machine (`core/detector.py::EventDetector`)
 
 ```
 IDLE → (RMS > baseline + threshold) → IN_EVENT
@@ -57,8 +57,11 @@ IN_EVENT → (RMS <= baseline + threshold) → IDLE (save event)
 - **Pre-roll buffer:** Stores 2s of audio before event (for context)
 - **Event chunks:** Accumulates audio during event
 - **Actual start index:** Tracks where real event begins (after pre-roll)
+- **State:** Managed by `EventDetector` class
 
-### 5. Chirp Classification (`monitor.py::classify_event_is_chirp`)
+### 5. Chirp Classification (`core/classifier.py`)
+
+The classification system is implemented in `core/classifier.py` with the following components:
 
 **Fingerprint System:**
 - **Chirp fingerprint:** Spectral template created from positive training examples (`training/chirp/chirp_*.wav`)
@@ -102,14 +105,17 @@ IN_EVENT → (RMS <= baseline + threshold) → IDLE (save event)
 
 ## Critical State Variables
 
-When debugging, check these in `run_monitor`:
+When debugging, check these in the core components:
 
-- `baseline_rms_db`: Current baseline level (None if not initialized)
-- `baseline_window`: Rolling window of RMS values
-- `in_event`: Boolean - are we currently in an event?
-- `event_chunks`: List of raw audio chunks for current event
-- `event_actual_start_idx`: Where real event starts (after pre-roll)
-- `pre_roll_buffer`: Audio before event (for context in clips)
+**BaselineTracker (`core/baseline.py`):**
+- `baseline_rms_db` (property): Current baseline level (None if not initialized)
+- `_baseline_window`: Rolling window of RMS values (internal)
+
+**EventDetector (`core/detector.py`):**
+- `in_event` (property): Boolean - are we currently in an event?
+- `_event_chunks`: List of raw audio chunks for current event
+- `_event_actual_start_idx`: Where real event starts (after pre-roll)
+- `_pre_roll_buffer`: Audio before event (for context in clips)
 
 ## Common Failure Modes
 

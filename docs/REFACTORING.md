@@ -102,7 +102,7 @@ while audio_capture.is_running():
 
 ## Migration Status
 
-The refactoring is complete. The old `monitor.py` has been replaced with the refactored version that uses the `core/` module architecture. The old code is preserved in `monitor_old_backup.py` for reference.
+The refactoring is complete. The old `monitor.py` has been replaced with the refactored version that uses the `core/` module architecture. All classification functions have been moved to `core/classifier.py`, and `monitor.py` now focuses solely on orchestration and utilities.
 
 ## Design Patterns Used
 
