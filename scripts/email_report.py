@@ -167,6 +167,7 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
         print("[ERROR] Email configuration incomplete. Set EMAIL_SMTP_SERVER and EMAIL_TO environment variables.")
         return False
     
+    server = None
     try:
         # Create message
         msg = MIMEMultipart()
@@ -186,7 +187,6 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
             server.login(email_config["smtp_username"], email_config["smtp_password"])
         
         server.send_message(msg)
-        server.quit()
         
         print(f"[INFO] Email sent successfully to {email_config['to_address']}")
         return True
@@ -194,6 +194,14 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
     except Exception as e:
         print(f"[ERROR] Failed to send email: {e}")
         return False
+    finally:
+        # Clean up connection - don't fail if quit() raises an exception
+        if server:
+            try:
+                server.quit()
+            except Exception:
+                # Ignore errors during cleanup - email was already sent
+                pass
 
 
 def main():
