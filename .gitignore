@@ -3,9 +3,15 @@ baseline.json
 config.json
 chirp_report*.md
 events.csv
+events.csv.backup
 training/
 clips/
 venv/
 data/
 .DS_Store
 .env
+__pycache__/
+*.pyc
+*.py~
+*.backup
+*.tmp

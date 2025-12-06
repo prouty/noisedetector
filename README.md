@@ -59,13 +59,19 @@ noisedetector/
 ├── config.json              # Configuration (create from config.example.json)
 ├── config.example.json      # Configuration template
 ├── noise_detector.py        # Main entry point
-├── monitor.py               # Core monitoring logic
+├── monitor.py               # Core monitoring logic (legacy)
+├── monitor_refactored.py   # Refactored monitor (SOLID principles)
 ├── baseline.py              # Baseline management
 ├── sampler.py               # Audio sampling
 ├── config_loader.py         # Configuration loader
-├── logger.py                # Logging utilities
 ├── audio_analysis.py        # Audio analysis utilities
 ├── utils.py                 # Utility functions
+├── core/                    # Core domain model (SOLID architecture)
+│   ├── audio.py            # AudioCapture, AudioChunk
+│   ├── baseline.py         # BaselineTracker
+│   ├── classifier.py       # Classifier interface & implementations
+│   ├── detector.py         # EventDetector
+│   └── repository.py       # EventRepository, SegmentRepository
 ├── scripts/                 # Python analysis and utility scripts
 │   ├── analyze_clips.py
 │   ├── check_chirps.py
@@ -86,6 +92,7 @@ noisedetector/
 │   └── email-report.timer
 ├── docs/                    # Documentation
 │   ├── ARCHITECTURE.md
+│   ├── REFACTORING.md       # SOLID principles refactoring guide
 │   ├── TROUBLESHOOTING.md
 │   └── EMAIL_SETUP.md
 ├── reports/                 # Generated reports
