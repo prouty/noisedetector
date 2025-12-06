@@ -91,7 +91,7 @@ class EventDetector:
         if not self._in_event:
             # Check if we should start an event
             if rms_db > threshold_db:
-                self._start_event(chunk, rms_db, peak_db)
+                self._start_event(chunk, chunk_data, rms_db, peak_db)
                 return None
         else:
             # Already in event - update stats
@@ -125,6 +125,7 @@ class EventDetector:
     def _start_event(
         self,
         chunk: AudioChunk,
+        chunk_data: bytes,
         rms_db: float,
         peak_db: float
     ) -> None:

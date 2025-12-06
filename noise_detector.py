@@ -6,6 +6,7 @@ from pathlib import Path
 import baseline
 import sampler
 import monitor
+import monitor_refactored
 
 MENU = """
 Noise Detector – Main Menu
@@ -21,13 +22,14 @@ def main():
         description="Noise Detector - Audio monitoring and chirp classification",
         epilog="""
 Examples:
-  python3 noise_detector.py monitor          # Start monitoring
+  python3 noise_detector.py monitor          # Start monitoring (legacy)
+  python3 noise_detector.py monitor-refactored  # Start monitoring (refactored)
   python3 noise_detector.py monitor --debug   # Start with debug logging
   python3 noise_detector.py baseline          # Set baseline
   python3 noise_detector.py                   # Interactive menu
         """
     )
-    parser.add_argument("mode", nargs="?", help="Mode: monitor, baseline, sample, show-baseline")
+    parser.add_argument("mode", nargs="?", help="Mode: monitor, monitor-refactored, baseline, sample, show-baseline")
     parser.add_argument("--config", type=Path, help="Path to config.json file")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode (verbose logging)")
     
@@ -39,6 +41,9 @@ Examples:
 
         if mode == "monitor":
             monitor.run_monitor(args.config, debug=args.debug)
+            return
+        elif mode == "monitor-refactored":
+            monitor_refactored.run_monitor(args.config, debug=args.debug)
             return
         elif mode == "baseline":
             baseline.set_baseline(config_path=args.config)

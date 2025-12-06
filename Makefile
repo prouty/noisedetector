@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml
+.PHONY: pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml
 
 pull:
 	@echo "==> Pulling events.csv and clips (<=10s) from Pi..."
@@ -179,8 +179,9 @@ reload:
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl daemon-reload'
 
 restart:
-	@echo "==> Restarting noise-monitor service on Pi..."
-	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl restart noise-monitor'
+	@echo "==> Deploying service file and restarting noise-monitor on Pi..."
+	scp systemd/noise-monitor.service $(PI_HOST):$(PI_DIR)/systemd/
+	ssh $(PI_HOST) "sudo cp $(PI_DIR)/systemd/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart noise-monitor"
 
 stop:
 	@echo "==> Stopping noise-monitor service on Pi..."
@@ -196,6 +197,12 @@ status:
 
 logs:
 	@echo "==> Viewing logs of noise-monitor service on Pi..."
+	@echo "==> Showing last 50 lines, then following new logs (Ctrl+C to exit)..."
+	@ssh $(PI_HOST) 'echo "=== Service Status ===" && sudo systemctl status noise-monitor --no-pager -l | head -10 && echo "" && echo "=== Recent Logs ===" && sudo journalctl -u noise-monitor -n 50 --no-pager && echo "" && echo "=== Following new logs (Ctrl+C to exit) ===" && sudo journalctl -u noise-monitor -f'
+
+logs-refactored:
+	@echo "==> Viewing logs of noise-monitor service (refactored) on Pi..."
+	@echo "==> Note: Service must be using 'monitor-refactored' mode"
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo journalctl -u noise-monitor -f'
 
 fix-deps:

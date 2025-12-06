@@ -4,7 +4,7 @@ After=network.target sound.target
 
 [Service]
 WorkingDirectory=/home/prouty/projects/noisedetector
-ExecStart=/usr/bin/python3 /home/prouty/projects/noisedetector/noise_detector.py monitor
+ExecStart=/usr/bin/python3 /home/prouty/projects/noisedetector/noise_detector.py monitor-refactored
 Restart=always
 RestartSec=10
 User=prouty
