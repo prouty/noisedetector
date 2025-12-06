@@ -198,31 +198,45 @@ def create_baseline(name: str, duration_sec: int = 10, description: str = "", co
     start = time.time()
     
     try:
+        buffer = b""  # Accumulate data until we have a full chunk
         while True:
+            # Read available data (may be less than chunk_bytes)
             data = proc.stdout.read(chunk_bytes)
-            if not data or len(data) < chunk_bytes:
-                break
-            
-            samples = np.frombuffer(data, dtype="<i2").astype(np.float32) / monitor.INT16_FULL_SCALE
-            if len(samples) == 0:
+            if not data:
+                # Process ended or pipe closed
+                if proc.poll() is not None:
+                    break
+                # Otherwise, wait a bit and try again
+                time.sleep(0.01)
                 continue
             
-            # Fix: If all samples are zeros, skip this chunk (likely silent/invalid)
-            if np.all(samples == 0):
-                continue
+            buffer += data
             
-            peak = float(np.max(np.abs(samples)))
-            rms = float(np.sqrt(np.mean(samples ** 2)))
-            
-            peak_db = monitor.dbfs(peak)
-            rms_db = monitor.dbfs(rms)
-            
-            # Don't allow NaN or inf values into arrays
-            if not (np.isfinite(peak_db) and np.isfinite(rms_db)):
-                continue
-            
-            peak_vals.append(peak_db)
-            rms_vals.append(rms_db)
+            # Process complete chunks
+            while len(buffer) >= chunk_bytes:
+                chunk_data = buffer[:chunk_bytes]
+                buffer = buffer[chunk_bytes:]
+                
+                samples = np.frombuffer(chunk_data, dtype="<i2").astype(np.float32) / monitor.INT16_FULL_SCALE
+                if len(samples) == 0:
+                    continue
+                
+                # Fix: If all samples are zeros, skip this chunk (likely silent/invalid)
+                if np.all(samples == 0):
+                    continue
+                
+                peak = float(np.max(np.abs(samples)))
+                rms = float(np.sqrt(np.mean(samples ** 2)))
+                
+                peak_db = monitor.dbfs(peak)
+                rms_db = monitor.dbfs(rms)
+                
+                # Don't allow NaN or inf values into arrays
+                if not (np.isfinite(peak_db) and np.isfinite(rms_db)):
+                    continue
+                
+                peak_vals.append(peak_db)
+                rms_vals.append(rms_db)
             
             if time.time() - start >= duration_sec:
                 break

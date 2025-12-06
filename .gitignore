@@ -15,3 +15,7 @@ __pycache__/
 *.py~
 *.backup
 *.tmp
+# Generated service files (use .example templates instead)
+# Service files are generated from templates - do not commit hardcoded paths
+systemd/noise-monitor.service
+systemd/email-report.service

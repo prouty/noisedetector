@@ -136,26 +136,35 @@ This creates `data/chirp_fingerprint.json`.
 
 ## Step 10: Install Systemd Service
 
-### Generate Service File
+Service files are generated from templates using your `.env` configuration.
+
+### Generate and Install Service File
+
 From your development machine:
 ```bash
 cd /path/to/noisedetector
-./deploy/install_service.sh
+
+# Generate service file from template (uses .env variables)
+./deploy/generate_service.sh noise-monitor
+
+# Or use Makefile (automatically generates and deploys)
+make restart
 ```
 
-This creates `/tmp/noise-monitor.service` with your settings.
+The service file is generated from `systemd/noise-monitor.service.example` using:
+- `SERVICE_USER` (defaults to `PI_USER`)
+- `SERVICE_WORKING_DIR` (defaults to `PI_DIR`)
 
-### Install on Pi
+### Manual Installation
+
+If you prefer to install manually:
 ```bash
-# Copy service file to Pi
-scp /tmp/noise-monitor.service prouty@raspberrypi:/tmp/
+# Generate service file
+./deploy/generate_service.sh noise-monitor
 
-# On the Pi, install the service
-ssh prouty@raspberrypi
-sudo cp /tmp/noise-monitor.service /etc/systemd/system/
-sudo systemctl daemon-reload
-sudo systemctl enable noise-monitor
-sudo systemctl start noise-monitor
+# Copy to Pi and install
+scp /tmp/noise-monitor.service ${PI_USER}@${PI_HOSTNAME}:/tmp/
+ssh ${PI_USER}@${PI_HOSTNAME} "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable noise-monitor && sudo systemctl start noise-monitor"
 ```
 
 ### Verify Service is Running

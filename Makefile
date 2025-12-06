@@ -179,9 +179,11 @@ reload:
 	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo systemctl daemon-reload'
 
 restart:
+	@echo "==> Generating service file from template..."
+	@./deploy/generate_service.sh noise-monitor
 	@echo "==> Deploying service file and restarting noise-monitor on Pi..."
-	scp systemd/noise-monitor.service $(PI_HOST):$(PI_DIR)/systemd/
-	ssh $(PI_HOST) "sudo cp $(PI_DIR)/systemd/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart noise-monitor"
+	@scp /tmp/noise-monitor.service $(PI_HOST):/tmp/
+	@ssh $(PI_HOST) "sudo cp /tmp/noise-monitor.service /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl restart noise-monitor"
 
 stop:
 	@echo "==> Stopping noise-monitor service on Pi..."
@@ -458,9 +460,11 @@ email-report-test:
 	ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/email_report.py --no-email'
 
 install-email-timer:
+	@echo "==> Generating email service file from template..."
+	@./deploy/generate_service.sh email-report
 	@echo "==> Installing email report timer on Pi..."
-	scp systemd/email-report.service systemd/email-report.timer $(PI_HOST):$(PI_DIR)/systemd/
-	ssh $(PI_HOST) "sudo cp $(PI_DIR)/systemd/email-report.service $(PI_DIR)/systemd/email-report.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now email-report.timer"
+	@scp /tmp/email-report.service systemd/email-report.timer $(PI_HOST):/tmp/
+	@ssh $(PI_HOST) "sudo cp /tmp/email-report.service /tmp/email-report.timer /etc/systemd/system/ && sudo systemctl daemon-reload && sudo systemctl enable --now email-report.timer"
 
 email-timer-status:
 	@echo "==> Checking email report timer status on Pi..."
