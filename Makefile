@@ -472,4 +472,15 @@ config-merge:
 	@jq '. * input' config.example.json config.json > config.json.tmp && mv config.json.tmp config.json
 	@echo "✓ Config merged (your values preserved, missing keys added)"
 
+email-timer-stop:
+	@echo "==> Stopping email report timer on Pi..."
+	ssh $(PI_HOST) 'sudo systemctl stop email-report.timer'
+
+email-timer-disable:
+	@echo "==> Disabling email report timer on Pi..."
+	ssh $(PI_HOST) 'sudo systemctl disable email-report.timer'
+
+email-timer-off: email-timer-stop email-timer-disable
+	@echo "==> Email timer stopped and disabled"
+
 workflow: pull report
