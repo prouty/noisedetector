@@ -63,7 +63,7 @@ core/
 
 ### Refactored Monitor
 
-The new `monitor_refactored.py` demonstrates the clean architecture:
+The refactored `monitor.py` demonstrates the clean architecture:
 
 ```python
 from core import (
@@ -100,13 +100,9 @@ while audio_capture.is_running():
 4. **Reusability**: Components can be reused in different contexts
 5. **Flexibility**: Easy to swap implementations (e.g., different classifiers)
 
-## Migration Path
+## Migration Status
 
-The refactored code (`monitor_refactored.py`) can be used alongside the existing `monitor.py`:
-
-1. **Phase 1**: Test refactored code in parallel
-2. **Phase 2**: Gradually migrate features
-3. **Phase 3**: Replace `monitor.py` once stable
+The refactoring is complete. The old `monitor.py` has been replaced with the refactored version that uses the `core/` module architecture. The old code is preserved in `monitor_old_backup.py` for reference.
 
 ## Design Patterns Used
 
@@ -124,7 +120,7 @@ The refactored code (`monitor_refactored.py`) can be used alongside the existing
 - Hard to test
 - Global state
 
-### After (core/ + monitor_refactored.py)
+### After (core/ + monitor.py)
 - Separated into focused classes
 - Clear responsibilities
 - Loose coupling via interfaces

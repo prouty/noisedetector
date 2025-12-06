@@ -13,6 +13,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 import monitor
+from core.classifier import classify_event_is_chirp, load_chirp_fingerprint
 
 
 def load_events(events_file: Path) -> pd.DataFrame:
@@ -66,7 +67,7 @@ def classify_clip(clip_path: Path, config: Dict, fingerprint_info: Optional[Dict
     duration_sec = len(samples) / audio_cfg["sample_rate"]
     
     # Classify
-    return monitor.classify_event_is_chirp(chunks, fingerprint_info, duration_sec, config)
+    return classify_event_is_chirp(chunks, fingerprint_info, duration_sec, config)
 
 
 def validate_classification(
@@ -77,7 +78,7 @@ def validate_classification(
 ):
     """Validate classification accuracy against reviewed events."""
     config = config_loader.load_config(config_path)
-    fingerprint_info = monitor.load_chirp_fingerprint(config)
+    fingerprint_info = load_chirp_fingerprint(config)
     
     df = load_events(events_file)
     if df.empty:

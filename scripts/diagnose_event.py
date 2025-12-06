@@ -13,12 +13,19 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 import monitor
+from core.classifier import (
+    classify_event_is_chirp,
+    load_chirp_fingerprint,
+    find_best_chirp_segment,
+    compute_event_spectrum_from_chunks,
+    compute_spectral_centroid
+)
 
 
 def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
     """Analyze a single clip and show detailed classification results."""
     config = config_loader.load_config(config_path)
-    fingerprint_info = monitor.load_chirp_fingerprint(config)
+    fingerprint_info = load_chirp_fingerprint(config)
     
     if not clip_path.exists():
         print(f"Error: {clip_path} not found")
@@ -52,12 +59,12 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
         return
     
     # Get classification result (this uses sliding window internally)
-    is_chirp, similarity, confidence, rejection_reason = monitor.classify_event_is_chirp(
+    is_chirp, similarity, confidence, rejection_reason = classify_event_is_chirp(
         chunks, fingerprint_info, duration_sec, config
     )
     
     # Find the best segment that was used for classification
-    best_chunks, best_similarity, _ = monitor.find_best_chirp_segment(
+    best_chunks, best_similarity, _ = find_best_chirp_segment(
         chunks, fingerprint_info, config
     )
     
@@ -72,7 +79,7 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
     
     # Compute spectrum from the best segment (what was actually used for classification)
     if fingerprint_info:
-        event_spec = monitor.compute_event_spectrum_from_chunks(
+        event_spec = compute_event_spectrum_from_chunks(
             analysis_chunks, fingerprint_info["sample_rate"], fingerprint_info["fft_size"]
         )
         
@@ -87,7 +94,7 @@ def diagnose_clip(clip_path: Path, config_path: Optional[Path] = None):
             low_freq_ratio = low_freq_energy / total_energy if total_energy > 0 else 0
             high_freq_ratio = high_freq_energy / total_energy if total_energy > 0 else 0
             
-            spectral_centroid = monitor.compute_spectral_centroid(
+            spectral_centroid = compute_spectral_centroid(
                 event_spec, fingerprint_info["sample_rate"], fingerprint_info["fft_size"]
             )
         else:

@@ -150,9 +150,10 @@ def validate_with_config(events_file: Path, config_path: Path) -> Optional[Dict]
     """Validate classification with a specific config and return metrics."""
     import monitor
     import config_loader
+    from core.classifier import load_chirp_fingerprint
     
     config = config_loader.load_config(config_path)
-    fingerprint_info = monitor.load_chirp_fingerprint(config)
+    fingerprint_info = load_chirp_fingerprint(config)
     
     df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
     if df.empty:

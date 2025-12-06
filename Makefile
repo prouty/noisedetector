@@ -200,10 +200,6 @@ logs:
 	@echo "==> Showing last 50 lines, then following new logs (Ctrl+C to exit)..."
 	@ssh $(PI_HOST) 'echo "=== Service Status ===" && sudo systemctl status noise-monitor --no-pager -l | head -10 && echo "" && echo "=== Recent Logs ===" && sudo journalctl -u noise-monitor -n 50 --no-pager && echo "" && echo "=== Following new logs (Ctrl+C to exit) ===" && sudo journalctl -u noise-monitor -f'
 
-logs-refactored:
-	@echo "==> Viewing logs of noise-monitor service (refactored) on Pi..."
-	@echo "==> Note: Service must be using 'monitor-refactored' mode"
-	ssh $(PI_HOST) 'cd $(PI_DIR) && sudo journalctl -u noise-monitor -f'
 
 fix-deps:
 	@echo "==> Fixing NumPy dependencies on Pi..."

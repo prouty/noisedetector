@@ -19,6 +19,7 @@ import sys
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 import monitor
+from core.classifier import classify_event_is_chirp, load_chirp_fingerprint
 
 # Import ML classification functions
 # Add scripts directory to path for imports
@@ -75,7 +76,7 @@ def classify_clip_fingerprint(clip_path: Path, config: Dict, fingerprint_info: O
     duration_sec = len(samples) / audio_cfg["sample_rate"]
     
     # Classify
-    return monitor.classify_event_is_chirp(chunks, fingerprint_info, duration_sec, config)
+    return classify_event_is_chirp(chunks, fingerprint_info, duration_sec, config)
 
 
 def compare_classifiers(
@@ -86,7 +87,7 @@ def compare_classifiers(
     config = config_loader.load_config(config_path)
     
     # Load both classifiers
-    fingerprint_info = monitor.load_chirp_fingerprint(config)
+    fingerprint_info = load_chirp_fingerprint(config)
     ml_model_info = load_ml_model(config)
     
     if fingerprint_info is None:

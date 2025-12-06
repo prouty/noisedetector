@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 import monitor
 import validate_classification
+from core.classifier import load_chirp_fingerprint
 
 # Try to import ML classifier
 try:
@@ -54,7 +55,7 @@ def rediagnose_training_files(
         - 'not_chirp_correct': Files in training/not_chirp/ correctly classified (optional)
     """
     config = config_loader.load_config(config_path)
-    fingerprint_info = monitor.load_chirp_fingerprint(config)
+    fingerprint_info = load_chirp_fingerprint(config)
     
     # Load ML model if configured
     ml_model_info = None

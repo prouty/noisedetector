@@ -60,7 +60,7 @@ noisedetector/
 ├── config.example.json      # Configuration template
 ├── noise_detector.py        # Main entry point
 ├── monitor.py               # Core monitoring logic (legacy)
-├── monitor_refactored.py   # Refactored monitor (SOLID principles)
+├── monitor.py              # Main monitoring loop (refactored, SOLID principles)
 ├── baseline.py              # Baseline management
 ├── sampler.py               # Audio sampling
 ├── config_loader.py         # Configuration loader
