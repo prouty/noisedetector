@@ -7,7 +7,7 @@ from typing import Optional
 import pandas as pd
 
 
-def check_chirps(events_file: Path = Path("events.csv"), recent_hours: Optional[int] = None):
+def check_chirps(events_file: Path = Path("data/events.csv"), recent_hours: Optional[int] = None):
     """Check for chirps in events.csv and show summary."""
     if not events_file.exists():
         print(f"No events file found: {events_file}")
@@ -108,7 +108,7 @@ if __name__ == "__main__":
     import argparse
     
     parser = argparse.ArgumentParser(description="Quick check for detected chirps")
-    parser.add_argument("--events", type=Path, default=Path("events.csv"), help="Path to events.csv")
+    parser.add_argument("--events", type=Path, default=Path("data/events.csv"), help="Path to events.csv")
     parser.add_argument("--recent", type=int, help="Show chirps from last N hours")
     
     args = parser.parse_args()
