@@ -8,7 +8,6 @@ Single Responsibility: Event data loading and report generation.
 import warnings
 import sys
 import os
-from io import StringIO
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Optional
