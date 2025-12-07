@@ -142,7 +142,7 @@ def send_email(report_text: str, email_config: Dict[str, Any]) -> bool:
                 # Only log cleanup errors if email wasn't already marked as sent
                 if not email_sent:
                     # This shouldn't happen, but just in case
-                    pass
+                    # Exception intentionally ignored
                 # Otherwise silently ignore - email was sent successfully
-                pass
+                    # Exception intentionally ignored
 
