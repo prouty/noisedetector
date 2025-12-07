@@ -7,6 +7,7 @@ Single Responsibility: Event data loading and report generation.
 """
 import warnings
 import sys
+import os
 from io import StringIO
 from pathlib import Path
 from datetime import datetime, timedelta
@@ -21,7 +22,7 @@ warnings.filterwarnings('ignore', message='.*Bottleneck.*')
 _original_stderr = sys.stderr
 _original_stdout = sys.stdout
 try:
-    with open(sys.devnull, 'w') as devnull:
+    with open(os.devnull, 'w') as devnull:
         sys.stderr = devnull
         sys.stdout = devnull
         import pandas as pd
