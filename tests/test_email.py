@@ -5,7 +5,7 @@ Tests email configuration and sending functionality.
 """
 import pytest
 import os
-from unittest.mock import Mock, patch, MagicMock
+from unittest.mock import patch, MagicMock
 from typing import Dict, Any
 
 from core.email import get_email_config, send_email
