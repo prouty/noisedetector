@@ -14,16 +14,10 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 import monitor
 from core.classifier import classify_event_is_chirp, load_chirp_fingerprint
+from core.reporting import load_events
 
 
-def load_events(events_file: Path) -> pd.DataFrame:
-    """Load events from CSV file."""
-    if not events_file.exists():
-        print(f"Error: {events_file} not found")
-        return pd.DataFrame()
-    
-    df = pd.read_csv(events_file)
-    return df
+# load_events is now in core.reporting - imported above
 
 
 def classify_clip(clip_path: Path, config: Dict, fingerprint_info: Optional[Dict]) -> Tuple[bool, Optional[float], Optional[float], Optional[str]]:

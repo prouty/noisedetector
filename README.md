@@ -80,6 +80,18 @@ make chirps-recent  # Show chirps from last 24 hours
 make health         # System health check
 ```
 
+### Testing
+
+```bash
+make test           # Run all tests
+make test-core      # Run core module tests (features, email, reporting)
+make test-features  # Run feature extraction tests
+make test-email     # Run email functionality tests
+make test-reporting # Run reporting tests
+```
+
+**Note:** Tests run locally on your development machine, not on the Pi. See [tests/README.md](tests/README.md) for details.
+
 ### Email Reports (Optional)
 
 ```bash
@@ -134,6 +146,15 @@ For detailed troubleshooting, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING
 - **[Usage Reference](docs/USAGE.md)**: All commands and tools
 - **[Architecture](docs/ARCHITECTURE.md)**: System design and components
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)**: Common issues and solutions
+- **[Testing Guide](tests/README.md)**: Test suite documentation
+
+## Quick Reference
+
+```bash
+make help        # Show all available commands
+make test        # Run all tests
+make logs        # View service logs
+```
 
 ## Project Structure
 
@@ -142,12 +163,17 @@ noisedetector/
 ├── monitor.py              # Main monitoring loop
 ├── noise_detector.py        # Entry point
 ├── core/                    # Core domain model (SOLID architecture)
-│   ├── audio.py            # AudioCapture
+│   ├── audio.py            # AudioCapture, AudioChunk
 │   ├── baseline.py         # BaselineTracker
-│   ├── classifier.py       # Classification logic
-│   ├── detector.py         # EventDetector
-│   └── repository.py       # EventRepository, SegmentRepository
-├── scripts/                 # Analysis and utility scripts
+│   ├── classifier.py       # Classification logic (Fingerprint, ML)
+│   ├── detector.py          # EventDetector
+│   ├── repository.py      # EventRepository, SegmentRepository
+│   ├── features.py         # Feature extraction (MFCC, spectral, temporal)
+│   ├── email.py            # Email functionality
+│   └── reporting.py        # Report generation, event loading
+├── scripts/                 # Analysis and utility scripts (thin CLI wrappers)
 ├── docs/                    # Documentation
 └── config.json             # Configuration (create from config.example.json)
 ```
+
+**Architecture:** The codebase follows SOLID principles with business logic in `core/` modules and scripts as thin CLI wrappers. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.

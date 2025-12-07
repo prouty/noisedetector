@@ -19,6 +19,9 @@ Each class has one clear responsibility:
 - **`EventDetector`**: Detects noise events above threshold
 - **`EventRepository`**: Handles event CSV file operations
 - **`SegmentRepository`**: Handles WAV segment file operations
+- **`core/features.py`**: Feature extraction utilities (MFCC, spectral, temporal)
+- **`core/email.py`**: Email sending functionality
+- **`core/reporting.py`**: Report generation and event data loading
 
 #### Open/Closed Principle (OCP)
 
@@ -103,6 +106,20 @@ while audio_capture.is_running():
 ## Migration Status
 
 The refactoring is complete. The old `monitor.py` has been replaced with the refactored version that uses the `core/` module architecture. All classification functions have been moved to `core/classifier.py`, and `monitor.py` now focuses solely on orchestration and utilities.
+
+## Scripts Directory Refactoring
+
+In addition to the monitor refactoring, the `scripts/` directory has also been refactored to follow SOLID principles:
+
+- **New core modules created:**
+  - `core/features.py` - Feature extraction (MFCC, spectral, temporal)
+  - `core/email.py` - Email functionality
+  - `core/reporting.py` - Report generation and event loading
+
+- **Scripts refactored:** All scripts now use core modules, eliminating ~800+ lines of duplicate code
+- **Duplicate code removed:** `classify_chirp_ml.py` removed (functionality in `core/classifier.py`)
+
+See [docs/REFACTORING_SCRIPTS.md](REFACTORING_SCRIPTS.md) for complete details.
 
 ## Design Patterns Used
 

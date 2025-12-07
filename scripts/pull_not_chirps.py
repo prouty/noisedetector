@@ -1,22 +1,17 @@
 #!/usr/bin/env python3
 """Extract non-chirp clip filenames from events.csv and prepare for rsync."""
-import csv
 import sys
 from pathlib import Path
 import pandas as pd
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.reporting import load_events
+
 
 def get_not_chirp_clips(events_file: Path, max_duration_sec: float = 10.0) -> list:
     """Get list of clip filenames that are classified as not chirps and <= max_duration_sec."""
-    if not events_file.exists():
-        print(f"Error: {events_file} not found", file=sys.stderr)
-        return []
-    
-    try:
-        df = pd.read_csv(events_file)
-    except Exception as e:
-        print(f"Error reading {events_file}: {e}", file=sys.stderr)
-        return []
+    df = load_events(events_file)
     
     if df.empty:
         return []

@@ -12,8 +12,8 @@ Usage:
     python3 scripts/train_chirp_ml.py
     python3 scripts/train_chirp_ml.py --model-type svm  # Use SVM instead
 """
+import sys
 import json
-import wave
 import argparse
 from pathlib import Path
 from typing import List, Tuple, Dict, Optional
@@ -24,6 +24,14 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import cross_val_score
 import joblib
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.features import (
+    load_mono_wav,
+    extract_mfcc_features,
+    extract_additional_features,
+)
+
 CHIRP_TRAIN_DIR = Path("training/chirp")
 NON_CHIRP_TRAIN_DIR = Path("training/not_chirp")
 OUTPUT_DIR = Path("data")
@@ -31,179 +39,8 @@ MODEL_FILE = OUTPUT_DIR / "chirp_model.pkl"
 SCALER_FILE = OUTPUT_DIR / "chirp_scaler.pkl"
 METADATA_FILE = OUTPUT_DIR / "chirp_model_metadata.json"
 
-INT16_FULL_SCALE = 32768.0
 
-
-def load_mono_wav(path: Path) -> Tuple[np.ndarray, int]:
-    """Load WAV file as mono float32 array."""
-    with wave.open(str(path), "rb") as wf:
-        nch = wf.getnchannels()
-        sr = wf.getframerate()
-        nframes = wf.getnframes()
-        frames = wf.readframes(nframes)
-    
-    samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
-    
-    if nch > 1:
-        samples = samples.reshape(-1, nch).mean(axis=1)
-    
-    return samples, sr
-
-
-def extract_mfcc_features(samples: np.ndarray, sr: int, n_mfcc: int = 13) -> np.ndarray:
-    """
-    Extract MFCC features from audio samples.
-    
-    MFCCs (Mel-frequency Cepstral Coefficients) are more robust than raw spectrum
-    for audio classification. They capture perceptual characteristics better.
-    
-    Args:
-        samples: Audio samples (float32, -1 to 1)
-        sr: Sample rate
-        n_mfcc: Number of MFCC coefficients (default 13)
-        
-    Returns:
-        Feature vector (mean, std, min, max of MFCCs across time)
-    """
-    # Simple MFCC-like features using FFT and mel-scale approximation
-    # For Pi compatibility, we'll use a lightweight implementation
-    
-    fft_size = 2048
-    hop_size = fft_size // 4
-    
-    if len(samples) < fft_size:
-        # Pad short clips
-        samples = np.pad(samples, (0, fft_size - len(samples)))
-    
-    # Compute STFT
-    window = np.hanning(fft_size)
-    frames = []
-    
-    for start in range(0, len(samples) - fft_size, hop_size):
-        frame = samples[start:start + fft_size] * window
-        fft = np.fft.rfft(frame)
-        magnitude = np.abs(fft)
-        frames.append(magnitude)
-    
-    if not frames:
-        # Fallback for very short clips
-        frame = np.pad(samples, (0, fft_size - len(samples))) * window
-        fft = np.fft.rfft(frame)
-        magnitude = np.abs(fft)
-        frames = [magnitude]
-    
-    frames = np.array(frames)
-    
-    # Apply mel-scale filterbank (simplified)
-    n_mel = 26
-    mel_filters = create_mel_filterbank(sr, fft_size, n_mel)
-    
-    # Apply filters
-    mel_spectrum = np.dot(frames, mel_filters.T)
-    
-    # Log scale
-    mel_spectrum = np.log(mel_spectrum + 1e-10)
-    
-    # DCT to get MFCCs
-    mfccs = dct(mel_spectrum, n_mfcc)
-    
-    # Aggregate across time: mean, std, min, max
-    features = np.concatenate([
-        np.mean(mfccs, axis=0),      # Mean MFCCs
-        np.std(mfccs, axis=0),       # Std MFCCs
-        np.min(mfccs, axis=0),       # Min MFCCs
-        np.max(mfccs, axis=0),       # Max MFCCs
-    ])
-    
-    return features
-
-
-def create_mel_filterbank(sr: int, fft_size: int, n_mel: int) -> np.ndarray:
-    """Create mel-scale filterbank (simplified version)."""
-    n_fft_bins = fft_size // 2 + 1
-    freq_bins = np.arange(n_fft_bins) * sr / fft_size
-    
-    # Mel scale: m = 2595 * log10(1 + f/700)
-    mel_max = 2595 * np.log10(1 + sr / 2 / 700)
-    mel_points = np.linspace(0, mel_max, n_mel + 2)
-    
-    # Convert back to Hz
-    hz_points = 700 * (10 ** (mel_points / 2595) - 1)
-    
-    # Create triangular filters
-    filters = np.zeros((n_mel, n_fft_bins))
-    
-    for i in range(n_mel):
-        start = hz_points[i]
-        center = hz_points[i + 1]
-        end = hz_points[i + 2]
-        
-        for j, freq in enumerate(freq_bins):
-            if start <= freq < center:
-                filters[i, j] = (freq - start) / (center - start)
-            elif center <= freq < end:
-                filters[i, j] = (end - freq) / (end - center)
-    
-    return filters
-
-
-def dct(x: np.ndarray, n_coeffs: int) -> np.ndarray:
-    """Discrete Cosine Transform (Type II)."""
-    N = x.shape[-1]
-    coeffs = np.arange(n_coeffs)
-    n = np.arange(N)
-    
-    # DCT-II: X[k] = sum(x[n] * cos(pi * k * (2n + 1) / (2N)))
-    dct_matrix = np.cos(np.pi * np.outer(coeffs, 2 * n + 1) / (2 * N))
-    
-    # Apply scaling
-    dct_matrix[0] *= 1 / np.sqrt(2)
-    dct_matrix *= np.sqrt(2 / N)
-    
-    return np.dot(x, dct_matrix.T)
-
-
-def extract_additional_features(samples: np.ndarray, sr: int) -> np.ndarray:
-    """Extract additional temporal and spectral features."""
-    features = []
-    
-    # Temporal features
-    rms = np.sqrt(np.mean(samples ** 2))
-    features.append(rms)
-    
-    zero_crossing_rate = np.mean(np.abs(np.diff(np.sign(samples)))) / 2
-    features.append(zero_crossing_rate)
-    
-    # Spectral features
-    fft = np.fft.rfft(samples[:2048] if len(samples) >= 2048 else np.pad(samples, (0, 2048 - len(samples))))
-    magnitude = np.abs(fft)
-    
-    # Spectral centroid
-    freqs = np.arange(len(magnitude)) * sr / (2 * len(magnitude))
-    spectral_centroid = np.sum(freqs * magnitude) / (np.sum(magnitude) + 1e-10)
-    features.append(spectral_centroid / 4000.0)  # Normalize
-    
-    # Spectral rolloff (frequency below which 85% of energy is contained)
-    cumsum = np.cumsum(magnitude)
-    rolloff_idx = np.where(cumsum >= 0.85 * cumsum[-1])[0]
-    spectral_rolloff = freqs[rolloff_idx[0]] if len(rolloff_idx) > 0 else 0
-    features.append(spectral_rolloff / 4000.0)  # Normalize
-    
-    # Energy in frequency bands
-    freq_resolution = sr / (2 * len(magnitude))
-    low_band = int(500 / freq_resolution)
-    mid_band = int(2000 / freq_resolution)
-    
-    total_energy = np.sum(magnitude)
-    if total_energy > 0:
-        low_energy = np.sum(magnitude[:low_band]) / total_energy
-        mid_energy = np.sum(magnitude[low_band:mid_band]) / total_energy
-        high_energy = np.sum(magnitude[mid_band:]) / total_energy
-        features.extend([low_energy, mid_energy, high_energy])
-    else:
-        features.extend([0, 0, 0])
-    
-    return np.array(features)
+# Feature extraction functions are now in core.features
 
 
 def load_training_data(chirp_dir: Path, non_chirp_dir: Path) -> Tuple[np.ndarray, np.ndarray]:
