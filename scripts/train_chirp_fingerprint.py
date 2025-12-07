@@ -11,56 +11,23 @@ The fingerprint file will contain both:
 
 Classification uses both: high similarity to chirp AND low similarity to non-chirp.
 """
+import sys
 import json
-import wave
 from pathlib import Path
 from typing import Optional, Tuple
 
 import numpy as np
 
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.features import load_mono_wav, compute_avg_spectrum
+
 CHIRP_TRAIN_DIR = Path("training/chirp")
 NON_CHIRP_TRAIN_DIR = Path("training/not_chirp")
 OUTPUT_FILE = Path("data/chirp_fingerprint.json")
 
-INT16_FULL_SCALE = 32768.0
 
-
-def load_mono_wav(path: Path):
-    with wave.open(str(path), "rb") as wf:
-        nch = wf.getnchannels()
-        sr = wf.getframerate()
-        nframes = wf.getnframes()
-        frames = wf.readframes(nframes)
-
-    samples = np.frombuffer(frames, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
-
-    if nch > 1:
-        samples = samples.reshape(-1, nch).mean(axis=1)
-
-    return samples, sr
-
-
-def compute_avg_spectrum(samples: np.ndarray, sr: int, fft_size: int = 2048):
-    if samples.shape[0] < fft_size:
-        pad = fft_size - samples.shape[0]
-        samples = np.pad(samples, (0, pad))
-
-    hop = fft_size // 2
-    window = np.hanning(fft_size)
-    specs = []
-
-    for start in range(0, len(samples) - fft_size, hop):
-        chunk = samples[start:start + fft_size] * window
-        spec = np.abs(np.fft.rfft(chunk))
-        specs.append(spec)
-
-    if not specs:
-        return None
-
-    avg_spec = np.mean(specs, axis=0)
-    norm = np.linalg.norm(avg_spec) + 1e-9
-    avg_spec = avg_spec / norm
-    return avg_spec, sr, fft_size
+# compute_avg_spectrum is now in core.features - imported above
 
 
 def train_fingerprint(train_dir: Path, pattern: str, name: str) -> Optional[Tuple[np.ndarray, int, int]]:
