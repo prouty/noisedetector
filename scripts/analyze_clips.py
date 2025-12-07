@@ -22,7 +22,6 @@ from core.reporting import load_events
 
 
 # Feature extraction functions are now in core.features
-# Feature extraction functions are now in core.features - imported above
 
 
 def analyze_clips(
