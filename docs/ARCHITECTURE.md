@@ -2,6 +2,8 @@
 
 This document explains how the noise detector works at a high level. Read this first when debugging.
 
+**Note:** The codebase has been refactored to follow SOLID principles. Business logic is in `core/` modules, while scripts are thin CLI wrappers. See [docs/REFACTORING_SCRIPTS.md](REFACTORING_SCRIPTS.md) for details.
+
 ## Overview
 
 The system continuously monitors audio, detects events above a baseline threshold, and classifies them as chirps or noise using spectral fingerprinting.
@@ -97,11 +99,38 @@ The classification system is implemented in `core/classifier.py` with the follow
 6. **Confidence Score:**
    - Weighted: 60% similarity, 20% frequency, 20% temporal
 
-### 6. File I/O
+### 6. File I/O (`core/repository.py`)
 
 - **Segments:** 5-minute WAV files in `clips/` directory
 - **Event clips:** Short clips of detected events (with pre-roll)
 - **Events log:** CSV file with all events and classification results
+
+### 7. Core Support Modules
+
+The system includes several core modules that provide reusable functionality:
+
+**`core/features.py`** - Audio feature extraction
+- `load_mono_wav()` - Load WAV files as mono float32 arrays
+- `extract_mfcc_features()` - Extract MFCC features for ML classification
+- `extract_additional_features()` - Extract temporal/spectral features
+- `compute_spectral_features()` - Spectral analysis (centroid, rolloff, etc.)
+- `compute_temporal_features()` - Temporal analysis (RMS, zero-crossing, etc.)
+- `compute_avg_spectrum()` - Average magnitude spectrum for fingerprinting
+- Used by: Training scripts, analysis scripts, ML classifier
+
+**`core/email.py`** - Email functionality
+- `get_email_config()` - Load email configuration from config.json or environment
+- `send_email()` - Send email reports via SMTP
+- Used by: `scripts/email_report.py`
+
+**`core/reporting.py`** - Report generation and event data loading
+- `load_events()` - Load events.csv with consistent error handling
+- `filter_recent_events()` - Filter events by time window
+- `generate_email_report()` - Generate formatted email reports
+- `generate_chirp_report()` - Generate markdown chirp reports
+- `add_date_column()` - Add date column from timestamps
+- `choose_latest_date()` - Get latest date from events
+- Used by: All scripts that read events.csv or generate reports
 
 ## Critical State Variables
 

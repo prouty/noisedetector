@@ -142,12 +142,17 @@ noisedetector/
 ├── monitor.py              # Main monitoring loop
 ├── noise_detector.py        # Entry point
 ├── core/                    # Core domain model (SOLID architecture)
-│   ├── audio.py            # AudioCapture
+│   ├── audio.py            # AudioCapture, AudioChunk
 │   ├── baseline.py         # BaselineTracker
-│   ├── classifier.py       # Classification logic
-│   ├── detector.py         # EventDetector
-│   └── repository.py       # EventRepository, SegmentRepository
-├── scripts/                 # Analysis and utility scripts
+│   ├── classifier.py       # Classification logic (Fingerprint, ML)
+│   ├── detector.py          # EventDetector
+│   ├── repository.py      # EventRepository, SegmentRepository
+│   ├── features.py         # Feature extraction (MFCC, spectral, temporal)
+│   ├── email.py            # Email functionality
+│   └── reporting.py        # Report generation, event loading
+├── scripts/                 # Analysis and utility scripts (thin CLI wrappers)
 ├── docs/                    # Documentation
 └── config.json             # Configuration (create from config.example.json)
 ```
+
+**Architecture:** The codebase follows SOLID principles with business logic in `core/` modules and scripts as thin CLI wrappers. See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
