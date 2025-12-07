@@ -210,9 +210,12 @@ These scripts have been updated to use core modules:
     - `docs/ARCHITECTURE.md` updated (see below)
     - **Status**: Complete
 
-16. ⚠️ **Add unit tests**
-    - **Status**: Optional future enhancement
-    - Core modules are functional and tested manually
+16. ✅ **Add unit tests**
+    - Created `tests/test_features.py` - 20+ tests for feature extraction
+    - Created `tests/test_email.py` - 9 tests for email functionality
+    - Created `tests/test_reporting.py` - 15+ tests for report generation
+    - Added Makefile targets: `test-features`, `test-email`, `test-reporting`, `test-core`
+    - **Status**: Complete
 
 ## File Structure After Refactoring
 

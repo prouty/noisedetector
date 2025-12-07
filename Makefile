@@ -152,6 +152,22 @@ test-capture-ml:
 	@echo "==> Running ML capture validation tests..."
 	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_capture_ml.py -v
 
+test-features:
+	@echo "==> Running feature extraction tests..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_features.py -v
+
+test-email:
+	@echo "==> Running email functionality tests..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_email.py -v
+
+test-reporting:
+	@echo "==> Running reporting tests..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_reporting.py -v
+
+test-core:
+	@echo "==> Running all core module tests..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_features.py tests/test_email.py tests/test_reporting.py -v
+
 train-ml-svm:
 	@echo "==> Training SVM model for chirp classification..."
 	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/train_chirp_ml.py --model-type svm
