@@ -17,7 +17,7 @@ from core.classifier import load_chirp_fingerprint
 
 # Try to import ML classifier
 try:
-    import scripts.classify_chirp_ml as ml_classifier
+    from core.classifier import load_chirp_ml_model, classify_clip_ml
     ML_AVAILABLE = True
 except ImportError:
     ML_AVAILABLE = False
@@ -30,7 +30,7 @@ def classify_file(clip_path: Path, config: Dict, fingerprint_info: Optional[Dict
     
     if use_ml and ml_model_info is not None and ML_AVAILABLE:
         # Use ML classifier
-        is_chirp, confidence, error = ml_classifier.classify_clip_ml(clip_path, ml_model_info)
+        is_chirp, confidence, error = classify_clip_ml(clip_path, ml_model_info)
         if error:
             # Fallback to fingerprint
             return validate_classification.classify_clip(clip_path, config, fingerprint_info)
@@ -61,7 +61,7 @@ def rediagnose_training_files(
     ml_model_info = None
     use_ml = config.get("chirp_classification", {}).get("use_ml_classifier", False)
     if use_ml and ML_AVAILABLE:
-        ml_model_info = ml_classifier.load_ml_model(config)
+        ml_model_info = load_chirp_ml_model(config)
         if ml_model_info:
             print(f"Using ML classifier for re-classification")
         else:

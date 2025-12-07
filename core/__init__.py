@@ -11,7 +11,14 @@ This module follows SOLID principles:
 
 from .audio import AudioCapture, AudioChunk
 from .baseline import BaselineTracker
-from .classifier import Classifier, FingerprintClassifier, MLClassifier, create_classifier
+from .classifier import (
+    Classifier,
+    FingerprintClassifier,
+    MLClassifier,
+    create_classifier,
+    load_chirp_ml_model,
+    classify_clip_ml,
+)
 from .detector import EventDetector
 from .repository import EventRepository, SegmentRepository
 from .features import (
@@ -46,6 +53,8 @@ __all__ = [
     'FingerprintClassifier',
     'MLClassifier',
     'create_classifier',
+    'load_chirp_ml_model',
+    'classify_clip_ml',
     # Detector
     'EventDetector',
     # Repository

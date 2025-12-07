@@ -13,13 +13,13 @@ import argparse
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
-from scripts.classify_chirp_ml import load_ml_model, classify_clip_ml
+from core.classifier import load_chirp_ml_model, classify_clip_ml
 
 
 def test_clip(clip_path: Path, config_path: Path = None):
     """Test ML model on a single clip."""
     config = config_loader.load_config(config_path)
-    ml_model_info = load_ml_model(config)
+    ml_model_info = load_chirp_ml_model(config)
     
     if ml_model_info is None:
         print("ERROR: ML model not found. Run 'make train-ml' first.")
@@ -52,7 +52,7 @@ def test_clip(clip_path: Path, config_path: Path = None):
 def test_training_data(config_path: Path = None):
     """Test ML model on all training data."""
     config = config_loader.load_config(config_path)
-    ml_model_info = load_ml_model(config)
+    ml_model_info = load_chirp_ml_model(config)
     
     if ml_model_info is None:
         print("ERROR: ML model not found. Run 'make train-ml' first.")

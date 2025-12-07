@@ -21,10 +21,8 @@ import config_loader
 import monitor
 from core.classifier import classify_event_is_chirp, load_chirp_fingerprint
 
-# Import ML classification functions
-# Add scripts directory to path for imports
-sys.path.insert(0, str(Path(__file__).parent))
-from classify_chirp_ml import load_ml_model, classify_clip_ml
+# Import ML classification functions from core
+from core.classifier import load_chirp_ml_model, classify_clip_ml
 
 
 def load_events(events_file: Path) -> pd.DataFrame:
@@ -88,7 +86,7 @@ def compare_classifiers(
     
     # Load both classifiers
     fingerprint_info = load_chirp_fingerprint(config)
-    ml_model_info = load_ml_model(config)
+    ml_model_info = load_chirp_ml_model(config)
     
     if fingerprint_info is None:
         print("ERROR: Fingerprint not found. Run 'make train' first.")

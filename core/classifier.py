@@ -49,19 +49,42 @@ def load_chirp_fingerprint(config: Dict[str, Any]) -> Optional[Dict[str, Any]]:
 
 
 def load_chirp_ml_model(config: Dict[str, Any]) -> Optional[Tuple]:
-    """Load ML model for chirp classification."""
+    """
+    Load ML model for chirp classification.
+    
+    Args:
+        config: Configuration dictionary
+        
+    Returns:
+        Tuple of (model, scaler, metadata) or None if not found
+    """
     try:
         import joblib
-        from scripts.classify_chirp_ml import load_ml_model
         
-        ml_model_info = load_ml_model(config)
-        if ml_model_info is None:
+        metadata_file = Path(config["chirp_classification"].get("ml_metadata_file", "data/chirp_model_metadata.json"))
+        
+        if not metadata_file.exists():
             return None
         
-        model, scaler, metadata = ml_model_info
-        print(f"[INFO] Loaded ML model: {metadata.get('model_type', 'unknown')} "
-              f"(train_acc={metadata.get('metrics', {}).get('train_accuracy', 0):.3f})")
-        return ml_model_info
+        try:
+            with metadata_file.open() as f:
+                metadata = json.load(f)
+            
+            model_file = metadata_file.parent / metadata["model_file"]
+            scaler_file = metadata_file.parent / metadata["scaler_file"]
+            
+            if not model_file.exists() or not scaler_file.exists():
+                return None
+            
+            model = joblib.load(model_file)
+            scaler = joblib.load(scaler_file)
+            
+            print(f"[INFO] Loaded ML model: {metadata.get('model_type', 'unknown')} "
+                  f"(train_acc={metadata.get('metrics', {}).get('train_accuracy', 0):.3f})")
+            return model, scaler, metadata
+        except Exception as e:
+            print(f"[WARN] Failed to load ML model: {e}")
+            return None
     except ImportError:
         print("[WARN] scikit-learn not available - ML classification disabled")
         return None
@@ -332,22 +355,92 @@ def classify_event_is_chirp_ml(
         config: Configuration dictionary
         
     Returns:
-        Tuple of (is_chirp, confidence, confidence, None)
+        Tuple of (is_chirp, similarity, confidence, rejection_reason)
     """
     try:
-        from scripts.classify_chirp_ml import classify_event_chunks_ml
+        from core.features import extract_mfcc_features, extract_additional_features
         
+        model, scaler, metadata = ml_model_info
         sr = config["audio"]["sample_rate"]
-        is_chirp, confidence, error = classify_event_chunks_ml(event_chunks, sr, ml_model_info)
         
-        if error:
-            return False, None, None, f"ml_error_{error}"
+        # Convert chunks to samples
+        samples_list = []
+        for chunk in event_chunks:
+            chunk_samples = np.frombuffer(chunk, dtype="<i2").astype(np.float32) / INT16_FULL_SCALE
+            samples_list.append(chunk_samples)
+        
+        if not samples_list:
+            return False, None, None, "no_audio_data"
+        
+        # Concatenate all chunks
+        samples = np.concatenate(samples_list)
+        
+        # Extract features
+        mfcc_features = extract_mfcc_features(samples, sr)
+        additional_features = extract_additional_features(samples, sr)
+        features = np.concatenate([mfcc_features, additional_features])
+        
+        # Reshape for single sample
+        features = features.reshape(1, -1)
+        
+        # Scale
+        features_scaled = scaler.transform(features)
+        
+        # Predict
+        prediction = model.predict(features_scaled)[0]
+        probability = model.predict_proba(features_scaled)[0]
+        
+        is_chirp = bool(prediction == 1)
+        confidence = float(probability[1] if is_chirp else probability[0])
         
         # For ML, we use confidence as both similarity and confidence
         return is_chirp, confidence, confidence, None
         
     except Exception as e:
         return False, None, None, f"ml_exception_{str(e)}"
+
+
+def classify_clip_ml(clip_path: Path, model_info: Tuple) -> Tuple[bool, float, Optional[str]]:
+    """
+    Classify a clip file using ML model.
+    
+    Args:
+        clip_path: Path to WAV file
+        model_info: Tuple from load_chirp_ml_model()
+        
+    Returns:
+        Tuple of (is_chirp, confidence, error_message)
+    """
+    try:
+        from core.features import load_mono_wav, extract_mfcc_features, extract_additional_features
+        
+        model, scaler, metadata = model_info
+        
+        # Load audio
+        samples, sr = load_mono_wav(clip_path)
+        
+        # Extract features
+        mfcc_features = extract_mfcc_features(samples, sr)
+        additional_features = extract_additional_features(samples, sr)
+        features = np.concatenate([mfcc_features, additional_features])
+        
+        # Reshape for single sample
+        features = features.reshape(1, -1)
+        
+        # Scale
+        features_scaled = scaler.transform(features)
+        
+        # Predict
+        prediction = model.predict(features_scaled)[0]
+        probability = model.predict_proba(features_scaled)[0]
+        
+        is_chirp = bool(prediction == 1)
+        confidence = float(probability[1] if is_chirp else probability[0])
+        
+        return is_chirp, confidence, None
+        
+    except Exception as e:
+        return False, 0.0, str(e)
 
 
 def classify_event_is_chirp(
