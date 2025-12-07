@@ -52,11 +52,27 @@ make health         # System health check (dependencies, config, disk space)
 make audio-check    # Validate audio capture levels on Pi
 ```
 
+### Testing
+
+```bash
+make test               # Run all tests
+make test-features      # Run feature extraction tests
+make test-email         # Run email functionality tests
+make test-reporting    # Run reporting tests
+make test-core          # Run all core module tests (features, email, reporting)
+make test-capture-ml    # Run ML capture tests
+```
+
+**Note:** All tests run locally on your development machine, not on the Pi. Tests use mocking for external dependencies.
+
+See [tests/README.md](../tests/README.md) for detailed testing documentation.
+
 ### Development
 
 ```bash
 make init       # Create virtual environment
 make shell       # Activate venv and start shell
+make help        # Show all available make commands
 ```
 
 ## Direct Python Commands

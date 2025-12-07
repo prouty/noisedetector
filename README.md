@@ -80,6 +80,18 @@ make chirps-recent  # Show chirps from last 24 hours
 make health         # System health check
 ```
 
+### Testing
+
+```bash
+make test           # Run all tests
+make test-core      # Run core module tests (features, email, reporting)
+make test-features  # Run feature extraction tests
+make test-email     # Run email functionality tests
+make test-reporting # Run reporting tests
+```
+
+**Note:** Tests run locally on your development machine, not on the Pi. See [tests/README.md](tests/README.md) for details.
+
 ### Email Reports (Optional)
 
 ```bash
@@ -134,6 +146,15 @@ For detailed troubleshooting, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING
 - **[Usage Reference](docs/USAGE.md)**: All commands and tools
 - **[Architecture](docs/ARCHITECTURE.md)**: System design and components
 - **[Troubleshooting](docs/TROUBLESHOOTING.md)**: Common issues and solutions
+- **[Testing Guide](tests/README.md)**: Test suite documentation
+
+## Quick Reference
+
+```bash
+make help        # Show all available commands
+make test        # Run all tests
+make logs        # View service logs
+```
 
 ## Project Structure
 

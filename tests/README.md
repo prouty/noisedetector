@@ -2,10 +2,14 @@
 
 This directory contains automated tests for the noise detector system.
 
+**All tests run locally on your development machine, not on the Raspberry Pi.**
+
 ## Setup
 
 Install test dependencies:
 ```bash
+make init        # Create virtual environment
+make shell       # Activate venv
 pip install -r requirements.txt
 ```
 
@@ -188,9 +192,30 @@ Tests for `core.reporting` module (report generation):
   - `test_generate_chirp_report`: Basic markdown report generation
   - `test_generate_chirp_report_no_chirps`: Report with no chirps
 
+## Test Coverage
+
+The test suite covers:
+
+- **Feature Extraction** (`test_features.py`): 17 tests covering WAV loading, MFCC extraction, spectral/temporal features
+- **Email Functionality** (`test_email.py`): 9 tests covering configuration loading and SMTP sending
+- **Report Generation** (`test_reporting.py`): 17 tests covering event loading, filtering, and report generation
+- **ML Capture** (`test_capture_ml.py`): Tests for ML-based capture decision system
+
+## Running Tests on Pi
+
+While tests are designed to run locally, you can also run them on the Pi:
+
+```bash
+ssh prouty@raspberrypi.local "cd ~/projects/noisedetector && python3 -m pytest tests/ -v"
+```
+
+However, this is not necessary for development - all tests use mocking and don't require hardware.
+
 ## Notes
 
 - Tests that require model files will skip if models aren't trained yet
 - Use `pytest.skip()` for conditional tests
 - Fixtures are automatically available to all tests
+- Tests use mocking for external dependencies (SMTP, file I/O)
+- Some tests create temporary files that are cleaned up automatically
 
