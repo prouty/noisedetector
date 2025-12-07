@@ -14,17 +14,62 @@ from .baseline import BaselineTracker
 from .classifier import Classifier, FingerprintClassifier, MLClassifier, create_classifier
 from .detector import EventDetector
 from .repository import EventRepository, SegmentRepository
+from .features import (
+    load_mono_wav,
+    compute_avg_spectrum,
+    create_mel_filterbank,
+    dct,
+    extract_mfcc_features,
+    extract_additional_features,
+    compute_spectral_features,
+    compute_temporal_features,
+    INT16_FULL_SCALE,
+)
+from .email import get_email_config, send_email
+from .reporting import (
+    load_events,
+    filter_recent_events,
+    generate_email_report,
+    add_date_column,
+    choose_latest_date,
+    generate_chirp_report,
+)
 
 __all__ = [
+    # Audio
     'AudioCapture',
     'AudioChunk',
+    # Baseline
     'BaselineTracker',
+    # Classifier
     'Classifier',
     'FingerprintClassifier',
     'MLClassifier',
     'create_classifier',
+    # Detector
     'EventDetector',
+    # Repository
     'EventRepository',
     'SegmentRepository',
+    # Features
+    'load_mono_wav',
+    'compute_avg_spectrum',
+    'create_mel_filterbank',
+    'dct',
+    'extract_mfcc_features',
+    'extract_additional_features',
+    'compute_spectral_features',
+    'compute_temporal_features',
+    'INT16_FULL_SCALE',
+    # Email
+    'get_email_config',
+    'send_email',
+    # Reporting
+    'load_events',
+    'filter_recent_events',
+    'generate_email_report',
+    'add_date_column',
+    'choose_latest_date',
+    'generate_chirp_report',
 ]
 
