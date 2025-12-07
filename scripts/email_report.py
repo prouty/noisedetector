@@ -6,7 +6,6 @@ This script is a thin CLI wrapper around core.reporting and core.email modules.
 """
 import sys
 from pathlib import Path
-from typing import Optional
 import argparse
 
 # Add parent directory to path for imports
