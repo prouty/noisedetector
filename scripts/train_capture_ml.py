@@ -32,6 +32,9 @@ import monitor
 # Import feature extraction
 from capture_ml import extract_capture_features, INT16_FULL_SCALE
 
+# Import event loading
+from core.reporting import load_events
+
 OUTPUT_DIR = Path("data")
 MODEL_FILE = OUTPUT_DIR / "capture_ml_model.joblib"
 SCALER_FILE = OUTPUT_DIR / "capture_ml_scaler.joblib"
@@ -45,7 +48,7 @@ def load_event_audio(events_file: Path, clips_dir: Path, config: dict) -> List[T
     Returns:
         List of (samples, sample_rate, is_chirp) tuples
     """
-    df = pd.read_csv(events_file)
+    df = load_events(events_file)
     
     if df.empty or "clip_file" not in df.columns:
         print("No events found in CSV")

@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
 """Quick check for detected chirps in events.csv."""
-import csv
+import sys
 from pathlib import Path
 from datetime import datetime
 from typing import Optional
-import pandas as pd
+
+# Add parent directory to path for imports
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from core.reporting import load_events
 
 
 def check_chirps(events_file: Path = Path("data/events.csv"), recent_hours: Optional[int] = None):
     """Check for chirps in events.csv and show summary."""
-    if not events_file.exists():
-        print(f"No events file found: {events_file}")
-        return
-    
-    df = pd.read_csv(events_file)
+    df = load_events(events_file)
     if df.empty:
         print("No events found in events.csv")
         return

@@ -21,6 +21,7 @@ import argparse
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
+from core.reporting import load_events
 
 
 def find_next_number(directory: Path, pattern_prefix: str) -> int:
@@ -129,7 +130,7 @@ def update_events_csv(events_file: Path, clip_path: Path, is_chirp: bool, clips_
                 print(f"    - {c}")
             return False
     
-    df = pd.read_csv(events_file)
+    df = load_events(events_file)
     if df.empty:
         print("[WARN] Events file is empty")
         return False
@@ -407,7 +408,7 @@ def mark_latest_unreviewed(is_chirp: bool, config_path: Optional[Path] = None):
         print(f"[ERROR] Events file not found: {events_file}")
         return False
     
-    df = pd.read_csv(events_file)
+    df = load_events(events_file)
     if df.empty:
         print("[ERROR] Events file is empty")
         return False

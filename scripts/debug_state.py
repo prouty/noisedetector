@@ -62,8 +62,8 @@ def dump_system_state(output_file: Path = Path("debug_state.json")):
     events_file = Path("events.csv")
     if events_file.exists():
         try:
-            import pandas as pd
-            df = pd.read_csv(events_file)
+            from core.reporting import load_events
+            df = load_events(events_file)
             state["events_summary"] = {
                 "total_events": len(df),
                 "chirps": len(df[df["is_chirp"].astype(str).str.upper() == "TRUE"]) if "is_chirp" in df.columns else 0,

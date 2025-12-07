@@ -155,7 +155,9 @@ def validate_with_config(events_file: Path, config_path: Path) -> Optional[Dict]
     config = config_loader.load_config(config_path)
     fingerprint_info = load_chirp_fingerprint(config)
     
-    df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
+    # Import here to avoid circular imports
+    from core.reporting import load_events
+    df = load_events(events_file)
     if df.empty:
         return None
     

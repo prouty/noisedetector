@@ -18,6 +18,7 @@ from core.features import (
     compute_spectral_features,
     compute_temporal_features,
 )
+from core.reporting import load_events
 
 
 # Feature extraction functions are now in core.features
@@ -32,7 +33,7 @@ def analyze_clips(
     """Analyze all clips and export features to CSV."""
     config = config_loader.load_config(config_path)
     
-    df = pd.read_csv(events_file) if events_file.exists() else pd.DataFrame()
+    df = load_events(events_file)
     if df.empty:
         print(f"No events found in {events_file}")
         return
