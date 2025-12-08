@@ -43,8 +43,14 @@ def load_events(events_file: Path) -> pd.DataFrame:
     if not events_file.exists():
         return pd.DataFrame()
     
-    df = pd.read_csv(events_file)
+    # Specify dtype for is_chirp to prevent pandas from inferring bool dtype.
+    # The CSV stores "TRUE"/"FALSE" as strings, so we explicitly read it as object/string.
+    # This prevents FutureWarning when assigning string values later.
+    dtype_spec = {"is_chirp": "object"}
+    
+    df = pd.read_csv(events_file, dtype=dtype_spec)
     df.columns = [c.strip() for c in df.columns]
+    
     return df
 
 

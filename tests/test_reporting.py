@@ -82,6 +82,21 @@ class TestLoadEvents:
             assert " start_timestamp " not in df.columns
         finally:
             tmp_path.unlink()
+    
+    def test_load_events_specifies_is_chirp_dtype(self):
+        """Test that load_events reads is_chirp as object dtype to prevent FutureWarning."""
+        test_df = pd.DataFrame({"start_timestamp": ["2025-01-01T12:00:00"], "is_chirp": [True]})
+        
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+            test_df.to_csv(tmp_path, index=False)
+        
+        try:
+            df = load_events(tmp_path)
+            assert df["is_chirp"].dtype == "object"
+            df.iloc[0, df.columns.get_loc("is_chirp")] = "FALSE"  # Should not raise FutureWarning
+        finally:
+            tmp_path.unlink()
 
 
 class TestFilterRecentEvents:
