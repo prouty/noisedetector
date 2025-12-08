@@ -29,23 +29,35 @@ from core.features import (
 class TestLoadMonoWav:
     """Test WAV file loading."""
     
-    def test_load_mono_wav(self, project_root_path):
+    def test_load_mono_wav(self):
         """Test loading a mono WAV file."""
-        # Try to find a test WAV file in training directory
-        test_wav = project_root_path / "training" / "chirp" / "chirp_2.wav"
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
         
-        if not test_wav.exists():
-            pytest.skip("No test WAV file found")
-        
-        samples, sr = load_mono_wav(test_wav)
-        
-        assert isinstance(samples, np.ndarray)
-        assert samples.dtype == np.float32
-        assert len(samples) > 0
-        assert sr > 0
-        # Samples should be in range [-1.0, 1.0)
-        assert np.all(samples >= -1.0)
-        assert np.all(samples < 1.0)
+        try:
+            # Create a simple mono WAV file
+            sr = 16000
+            duration = 0.1  # Short test file
+            t = np.linspace(0, duration, int(sr * duration))
+            samples_int16 = (np.sin(2 * np.pi * 440 * t) * 0.5 * INT16_FULL_SCALE).astype(np.int16)
+            
+            with wave.open(str(tmp_path), "wb") as wf:
+                wf.setnchannels(1)
+                wf.setsampwidth(2)
+                wf.setframerate(sr)
+                wf.writeframes(samples_int16.tobytes())
+            
+            # Load it
+            samples, loaded_sr = load_mono_wav(tmp_path)
+            
+            assert isinstance(samples, np.ndarray)
+            assert samples.dtype == np.float32
+            assert len(samples) > 0
+            assert loaded_sr == sr
+            assert np.all(samples >= -1.0)
+            assert np.all(samples < 1.0)
+        finally:
+            tmp_path.unlink()
     
     def test_load_mono_wav_creates_temp_file(self):
         """Test loading a temporary WAV file."""
