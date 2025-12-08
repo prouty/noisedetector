@@ -10,8 +10,6 @@ Tests audio feature extraction functions including:
 import pytest
 import numpy as np
 from pathlib import Path
-import wave
-import tempfile
 
 from core.features import (
     load_mono_wav,
@@ -25,29 +23,23 @@ from core.features import (
     INT16_FULL_SCALE,
 )
 
+from tests.conftest import (
+    create_test_wav_file,
+    create_test_audio_samples,
+    TEST_SAMPLE_RATE,
+    TEST_FREQUENCY,
+    TEST_DURATION,
+)
+
 
 class TestLoadMonoWav:
     """Test WAV file loading."""
     
     def test_load_mono_wav(self):
         """Test loading a mono WAV file."""
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = Path(tmp.name)
+        tmp_path, sr = create_test_wav_file(duration=0.1)
         
         try:
-            # Create a simple mono WAV file
-            sr = 16000
-            duration = 0.1  # Short test file
-            t = np.linspace(0, duration, int(sr * duration))
-            samples_int16 = (np.sin(2 * np.pi * 440 * t) * 0.5 * INT16_FULL_SCALE).astype(np.int16)
-            
-            with wave.open(str(tmp_path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(sr)
-                wf.writeframes(samples_int16.tobytes())
-            
-            # Load it
             samples, loaded_sr = load_mono_wav(tmp_path)
             
             assert isinstance(samples, np.ndarray)
@@ -59,31 +51,18 @@ class TestLoadMonoWav:
         finally:
             tmp_path.unlink()
     
-    def test_load_mono_wav_creates_temp_file(self):
-        """Test loading a temporary WAV file."""
-        # Create a temporary mono WAV file
-        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp:
-            tmp_path = Path(tmp.name)
+    def test_load_mono_wav_roundtrip(self):
+        """Test that loaded samples match original audio data."""
+        tmp_path, sr = create_test_wav_file()
+        samples_int16 = create_test_audio_samples(sr, TEST_DURATION, TEST_FREQUENCY)
         
         try:
-            # Generate test audio: 1 second of 440 Hz sine wave at 16kHz
-            sr = 16000
-            duration = 1.0
-            t = np.linspace(0, duration, int(sr * duration))
-            samples_int16 = (np.sin(2 * np.pi * 440 * t) * 0.5 * INT16_FULL_SCALE).astype(np.int16)
-            
-            with wave.open(str(tmp_path), "wb") as wf:
-                wf.setnchannels(1)
-                wf.setsampwidth(2)
-                wf.setframerate(sr)
-                wf.writeframes(samples_int16.tobytes())
-            
-            # Load it
             loaded_samples, loaded_sr = load_mono_wav(tmp_path)
             
             assert loaded_sr == sr
             assert len(loaded_samples) == len(samples_int16)
-            assert np.allclose(loaded_samples, samples_int16.astype(np.float32) / INT16_FULL_SCALE, atol=0.01)
+            expected = samples_int16.astype(np.float32) / INT16_FULL_SCALE
+            assert np.allclose(loaded_samples, expected, atol=0.01)
         finally:
             tmp_path.unlink()
     
@@ -99,17 +78,14 @@ class TestComputeAvgSpectrum:
     
     def test_compute_avg_spectrum(self):
         """Test computing average spectrum from samples."""
-        # Generate test audio: 1 second of 440 Hz sine wave
-        sr = 16000
-        duration = 1.0
-        t = np.linspace(0, duration, int(sr * duration))
-        samples = np.sin(2 * np.pi * 440 * t).astype(np.float32)
+        samples_int16 = create_test_audio_samples()
+        samples = samples_int16.astype(np.float32) / INT16_FULL_SCALE
         
-        result = compute_avg_spectrum(samples, sr, fft_size=2048)
+        result = compute_avg_spectrum(samples, TEST_SAMPLE_RATE, fft_size=2048)
         
         assert result is not None
         spectrum, result_sr, result_fft_size = result
-        assert result_sr == sr
+        assert result_sr == TEST_SAMPLE_RATE
         assert result_fft_size == 2048
         assert isinstance(spectrum, np.ndarray)
         assert len(spectrum) == 2048 // 2 + 1  # rfft output size
@@ -117,12 +93,10 @@ class TestComputeAvgSpectrum:
     
     def test_compute_avg_spectrum_short_audio(self):
         """Test with audio shorter than FFT size."""
-        sr = 16000
         # Need enough samples after padding to create at least one window
-        # After padding to 2048, we need at least 2048 samples for the loop to execute
         samples = np.random.randn(3000).astype(np.float32) * 0.1
         
-        result = compute_avg_spectrum(samples, sr, fft_size=2048)
+        result = compute_avg_spectrum(samples, TEST_SAMPLE_RATE, fft_size=2048)
         
         assert result is not None
         spectrum, _, _ = result
@@ -130,10 +104,9 @@ class TestComputeAvgSpectrum:
     
     def test_compute_avg_spectrum_empty(self):
         """Test with empty samples."""
-        sr = 16000
         samples = np.array([], dtype=np.float32)
         
-        result = compute_avg_spectrum(samples, sr)
+        result = compute_avg_spectrum(samples, TEST_SAMPLE_RATE)
         
         assert result is None
 
@@ -143,16 +116,13 @@ class TestMelFilterbank:
     
     def test_create_mel_filterbank(self):
         """Test creating mel filterbank."""
-        sr = 16000
         fft_size = 2048
         n_mel = 13
         
-        filterbank = create_mel_filterbank(sr, fft_size, n_mel)
+        filterbank = create_mel_filterbank(TEST_SAMPLE_RATE, fft_size, n_mel)
         
         assert isinstance(filterbank, np.ndarray)
         assert filterbank.shape == (n_mel, fft_size // 2 + 1)
-        assert np.all(filterbank >= 0)
-        # Filters are triangular, not normalized - just check they're non-negative
         assert np.all(filterbank >= 0)
     
     def test_create_mel_filterbank_different_sizes(self):
@@ -189,29 +159,26 @@ class TestMFCCFeatures:
     
     def test_extract_mfcc_features(self):
         """Test MFCC feature extraction."""
-        # Generate test audio: 1 second of mixed frequencies
-        sr = 16000
-        duration = 1.0
-        t = np.linspace(0, duration, int(sr * duration))
-        samples = (np.sin(2 * np.pi * 440 * t) + 
-                  0.5 * np.sin(2 * np.pi * 880 * t)).astype(np.float32)
+        # Generate test audio: mixed frequencies
+        t = np.linspace(0, TEST_DURATION, int(TEST_SAMPLE_RATE * TEST_DURATION))
+        samples = (np.sin(2 * np.pi * TEST_FREQUENCY * t) + 
+                  0.5 * np.sin(2 * np.pi * TEST_FREQUENCY * 2 * t)).astype(np.float32)
         
-        mfcc = extract_mfcc_features(samples, sr, n_mfcc=13)
+        mfcc = extract_mfcc_features(samples, TEST_SAMPLE_RATE, n_mfcc=13)
         
         assert isinstance(mfcc, np.ndarray)
         # Returns 4*n_mfcc features (mean, std, min, max)
         assert len(mfcc) == 13 * 4
         assert mfcc.dtype in (np.float32, np.float64)
     
-    def test_extract_mfcc_features_different_n(self):
+    @pytest.mark.parametrize("n_mfcc", [10, 13, 20])
+    def test_extract_mfcc_features_different_n(self, n_mfcc):
         """Test with different number of MFCC coefficients."""
-        sr = 16000
-        samples = np.random.randn(16000).astype(np.float32) * 0.1
+        samples = np.random.randn(TEST_SAMPLE_RATE).astype(np.float32) * 0.1
         
-        for n_mfcc in [10, 13, 20]:
-            mfcc = extract_mfcc_features(samples, sr, n_mfcc=n_mfcc)
-            # Returns 4*n_mfcc features (mean, std, min, max)
-            assert len(mfcc) == n_mfcc * 4
+        mfcc = extract_mfcc_features(samples, TEST_SAMPLE_RATE, n_mfcc=n_mfcc)
+        # Returns 4*n_mfcc features (mean, std, min, max)
+        assert len(mfcc) == n_mfcc * 4
 
 
 class TestAdditionalFeatures:
@@ -219,16 +186,13 @@ class TestAdditionalFeatures:
     
     def test_extract_additional_features(self):
         """Test additional feature extraction."""
-        sr = 16000
-        duration = 1.0
-        t = np.linspace(0, duration, int(sr * duration))
-        samples = np.sin(2 * np.pi * 440 * t).astype(np.float32)
+        samples_int16 = create_test_audio_samples()
+        samples = samples_int16.astype(np.float32) / INT16_FULL_SCALE
         
-        features = extract_additional_features(samples, sr)
+        features = extract_additional_features(samples, TEST_SAMPLE_RATE)
         
         assert isinstance(features, np.ndarray)
         assert len(features) > 0
-        # Returns float64 (default numpy dtype)
         assert features.dtype in (np.float32, np.float64)
         # Should extract multiple features (RMS, ZCR, spectral centroid, rolloff, freq bands)
         assert len(features) >= 5
@@ -239,12 +203,10 @@ class TestSpectralFeatures:
     
     def test_compute_spectral_features(self):
         """Test computing spectral features."""
-        sr = 16000
-        duration = 1.0
-        t = np.linspace(0, duration, int(sr * duration))
-        samples = np.sin(2 * np.pi * 440 * t).astype(np.float32)
+        samples_int16 = create_test_audio_samples()
+        samples = samples_int16.astype(np.float32) / INT16_FULL_SCALE
         
-        features = compute_spectral_features(samples, sr)
+        features = compute_spectral_features(samples, TEST_SAMPLE_RATE)
         
         assert isinstance(features, dict)
         assert "spectral_centroid" in features
@@ -258,12 +220,10 @@ class TestSpectralFeatures:
     
     def test_compute_spectral_features_empty(self):
         """Test with empty samples."""
-        sr = 16000
         samples = np.array([], dtype=np.float32)
         
-        features = compute_spectral_features(samples, sr)
+        features = compute_spectral_features(samples, TEST_SAMPLE_RATE)
         
-        # Should return dict with zero/None values
         assert isinstance(features, dict)
 
 
@@ -272,12 +232,10 @@ class TestTemporalFeatures:
     
     def test_compute_temporal_features(self):
         """Test computing temporal features."""
-        sr = 16000
-        duration = 1.0
-        t = np.linspace(0, duration, int(sr * duration))
-        samples = np.sin(2 * np.pi * 440 * t).astype(np.float32)
+        samples_int16 = create_test_audio_samples()
+        samples = samples_int16.astype(np.float32) / INT16_FULL_SCALE
         
-        features = compute_temporal_features(samples, sr)
+        features = compute_temporal_features(samples, TEST_SAMPLE_RATE)
         
         assert isinstance(features, dict)
         assert "duration_sec" in features
@@ -288,10 +246,9 @@ class TestTemporalFeatures:
     
     def test_compute_temporal_features_empty(self):
         """Test with empty samples."""
-        sr = 16000
         samples = np.array([], dtype=np.float32)
         
-        features = compute_temporal_features(samples, sr)
+        features = compute_temporal_features(samples, TEST_SAMPLE_RATE)
         
         assert isinstance(features, dict)
 

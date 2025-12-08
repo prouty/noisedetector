@@ -8,7 +8,6 @@ import pandas as pd
 from pathlib import Path
 from datetime import datetime, timedelta
 import tempfile
-import csv
 
 from core.reporting import (
     load_events,
@@ -18,6 +17,8 @@ from core.reporting import (
     choose_latest_date,
     generate_chirp_report,
 )
+
+from tests.conftest import create_test_csv_file
 
 
 class TestLoadEvents:
@@ -47,12 +48,13 @@ class TestLoadEvents:
     
     def test_load_events_creates_temp_file(self):
         """Test loading a temporary CSV file."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-            writer = csv.writer(tmp)
-            writer.writerow(["start_timestamp", "duration_sec", "is_chirp", "clip_file"])
-            writer.writerow(["2025-01-01T12:00:00", "1.5", "True", "clip1.wav"])
-            writer.writerow(["2025-01-01T12:05:00", "2.0", "False", "clip2.wav"])
+        tmp_path = create_test_csv_file(
+            headers=["start_timestamp", "duration_sec", "is_chirp", "clip_file"],
+            rows=[
+                ["2025-01-01T12:00:00", "1.5", "True", "clip1.wav"],
+                ["2025-01-01T12:05:00", "2.0", "False", "clip2.wav"],
+            ]
+        )
         
         try:
             df = load_events(tmp_path)
@@ -67,16 +69,14 @@ class TestLoadEvents:
     
     def test_load_events_strips_column_names(self):
         """Test that column names are stripped of whitespace."""
-        with tempfile.NamedTemporaryFile(mode='w', suffix='.csv', delete=False) as tmp:
-            tmp_path = Path(tmp.name)
-            writer = csv.writer(tmp)
-            writer.writerow([" start_timestamp ", " duration_sec "])
-            writer.writerow(["2025-01-01T12:00:00", "1.5"])
+        tmp_path = create_test_csv_file(
+            headers=[" start_timestamp ", " duration_sec "],
+            rows=[["2025-01-01T12:00:00", "1.5"]]
+        )
         
         try:
             df = load_events(tmp_path)
             
-            # Column names should be stripped
             assert "start_timestamp" in df.columns
             assert "duration_sec" in df.columns
             assert " start_timestamp " not in df.columns

@@ -86,14 +86,10 @@ class TestGetEmailConfig:
 class TestSendEmail:
     """Test email sending functionality."""
     
-    @patch('core.email.smtplib.SMTP')
-    def test_send_email_success(self, mock_smtp_class):
-        """Test successful email sending."""
-        # Setup mock SMTP server
-        mock_server = MagicMock()
-        mock_smtp_class.return_value = mock_server
-        
-        email_config = {
+    @staticmethod
+    def _create_email_config(**overrides):
+        """Create email config dict with defaults, allowing overrides."""
+        defaults = {
             "smtp_server": "smtp.test.com",
             "smtp_port": 587,
             "smtp_username": "user",
@@ -102,9 +98,17 @@ class TestSendEmail:
             "to_address": "to@test.com",
             "use_tls": True,
         }
+        defaults.update(overrides)
+        return defaults
+    
+    @patch('core.email.smtplib.SMTP')
+    def test_send_email_success(self, mock_smtp_class):
+        """Test successful email sending."""
+        mock_server = MagicMock()
+        mock_smtp_class.return_value = mock_server
         
-        report_text = "Test report content"
-        result = send_email(report_text, email_config)
+        email_config = self._create_email_config()
+        result = send_email("Test report content", email_config)
         
         assert result is True
         mock_smtp_class.assert_called_once_with("smtp.test.com", 587)
@@ -119,30 +123,17 @@ class TestSendEmail:
         mock_server = MagicMock()
         mock_smtp_class.return_value = mock_server
         
-        email_config = {
-            "smtp_server": "smtp.test.com",
-            "smtp_port": 465,
-            "smtp_username": "user",
-            "smtp_password": "pass",
-            "from_address": "from@test.com",
-            "to_address": "to@test.com",
-            "use_tls": False,
-        }
-        
+        email_config = self._create_email_config(smtp_port=465, use_tls=False)
         result = send_email("Test", email_config)
         
         assert result is True
-        # Should not call starttls when use_tls is False
         mock_server.starttls.assert_not_called()
         mock_server.login.assert_called_once_with("user", "pass")
     
     @patch('core.email.smtplib.SMTP')
     def test_send_email_missing_config(self, mock_smtp_class):
         """Test email sending with missing required config."""
-        email_config = {
-            "smtp_server": "",  # Missing server
-            "to_address": "",   # Missing recipient
-        }
+        email_config = self._create_email_config(smtp_server="", to_address="")
         
         result = send_email("Test", email_config)
         
@@ -152,55 +143,32 @@ class TestSendEmail:
     @patch('core.email.smtplib.SMTP')
     def test_send_email_smtp_error(self, mock_smtp_class):
         """Test handling of SMTP login errors."""
-        mock_server = MagicMock()
-        # Login error should cause function to raise and return False
-        # Use smtplib.SMTPAuthenticationError to be more realistic
         from smtplib import SMTPAuthenticationError
+        
+        mock_server = MagicMock()
         mock_server.login.side_effect = SMTPAuthenticationError(535, "Authentication failed")
         mock_smtp_class.return_value = mock_server
         
-        email_config = {
-            "smtp_server": "smtp.test.com",
-            "smtp_port": 587,
-            "smtp_username": "user",
-            "smtp_password": "pass",
-            "from_address": "from@test.com",
-            "to_address": "to@test.com",
-            "use_tls": True,
-        }
-        
+        email_config = self._create_email_config()
         result = send_email("Test", email_config)
         
         assert result is False
         mock_server.login.assert_called_once()
-        # Should not have called send_message if login failed
         mock_server.send_message.assert_not_called()
     
     @patch('core.email.smtplib.SMTP')
     def test_send_email_cleanup_on_error(self, mock_smtp_class):
         """Test that cleanup happens even on send error."""
-        mock_server = MagicMock()
-        # Make send_message raise a non-535 error (real send failure, not FastMail quirk)
-        # Use SMTPException to be more realistic
         from smtplib import SMTPException
+        
+        mock_server = MagicMock()
         mock_server.send_message.side_effect = SMTPException(550, "Mailbox unavailable")
         mock_smtp_class.return_value = mock_server
         
-        email_config = {
-            "smtp_server": "smtp.test.com",
-            "smtp_port": 587,
-            "smtp_username": "user",
-            "smtp_password": "pass",
-            "from_address": "from@test.com",
-            "to_address": "to@test.com",
-            "use_tls": True,
-        }
-        
+        email_config = self._create_email_config()
         result = send_email("Test", email_config)
         
         assert result is False
-        # Should have attempted to send
         mock_server.send_message.assert_called_once()
-        # Should still attempt cleanup
         mock_server.quit.assert_called_once()
 
