@@ -30,7 +30,8 @@ pytest tests/ -v
 ### Run specific test file:
 ```bash
 pytest tests/test_capture_ml.py -v
-pytest tests/test_features.py -v
+pytest tests/test_audio_io.py -v
+pytest tests/test_audio_features.py -v
 pytest tests/test_email.py -v
 pytest tests/test_reporting.py -v
 ```
@@ -53,7 +54,8 @@ pytest tests/test_capture_ml.py::TestCaptureMLValidation::test_validate_ml_captu
 
 - `conftest.py`: Shared fixtures and configuration
 - `test_capture_ml.py`: Tests for ML-based capture decision system
-- `test_features.py`: Tests for `core.features` module (feature extraction)
+- `test_audio_io.py`: Tests for WAV file loading (`core.features.load_mono_wav`)
+- `test_audio_features.py`: Tests for `core.features` module (feature extraction)
 - `test_email.py`: Tests for `core.email` module (email functionality)
 - `test_reporting.py`: Tests for `core.reporting` module (report generation)
 
@@ -105,14 +107,18 @@ Tests for ML-based capture decision:
 - **TestCaptureMLValidation**: Comprehensive validation
   - `test_validate_ml_capture_setup`: Main validation test
 
-### `test_features.py`
+### `test_audio_io.py`
 
-Tests for `core.features` module (audio feature extraction):
+Tests for WAV file loading (`core.features.load_mono_wav`):
 
 - **TestLoadMonoWav**: WAV file loading
   - `test_load_mono_wav`: Load existing WAV file
-  - `test_load_mono_wav_creates_temp_file`: Load temporary WAV file
+  - `test_load_mono_wav_roundtrip`: Verify loaded samples match original
   - `test_load_nonexistent_file`: Error handling
+
+### `test_audio_features.py`
+
+Tests for `core.features` module (audio feature extraction):
 
 - **TestComputeAvgSpectrum**: Average spectrum computation
   - `test_compute_avg_spectrum`: Basic spectrum computation
@@ -196,9 +202,10 @@ Tests for `core.reporting` module (report generation):
 
 The test suite covers:
 
-- **Feature Extraction** (`test_features.py`): 17 tests covering WAV loading, MFCC extraction, spectral/temporal features
+- **Audio I/O** (`test_audio_io.py`): 3 tests covering WAV file loading
+- **Feature Extraction** (`test_audio_features.py`): 14 tests covering MFCC extraction, spectral/temporal features
 - **Email Functionality** (`test_email.py`): 9 tests covering configuration loading and SMTP sending
-- **Report Generation** (`test_reporting.py`): 17 tests covering event loading, filtering, and report generation
+- **Report Generation** (`test_reporting.py`): 18 tests covering event loading, filtering, and report generation
 - **ML Capture** (`test_capture_ml.py`): Tests for ML-based capture decision system
 
 ## Running Tests on Pi

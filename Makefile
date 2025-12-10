@@ -249,7 +249,7 @@ test-capture-ml:
 
 test-features:
 	@echo "==> Running feature extraction tests..."
-	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_features.py -v
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_audio_io.py tests/test_audio_features.py -v
 
 test-email:
 	@echo "==> Running email functionality tests..."
@@ -261,7 +261,7 @@ test-reporting:
 
 test-core:
 	@echo "==> Running all core module tests..."
-	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_features.py tests/test_email.py tests/test_reporting.py -v
+	cd $(LOCAL_DIR) && . venv/bin/activate && pytest tests/test_audio_io.py tests/test_audio_features.py tests/test_email.py tests/test_reporting.py -v
 
 train-ml-svm:
 	@echo "==> Training SVM model for chirp classification..."
