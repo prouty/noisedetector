@@ -122,12 +122,13 @@ def check_dc_offset(clip_path: Path) -> Tuple[float, bool]:
     
     return dc_offset_db, is_problematic
 
-
 def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: float = 5.0) -> Dict:
     """
     Validate that audio capture levels are appropriate.
     Checks for clipping, too-quiet signals, DC offset, and noise floor.
     """
+    import time
+    
     config = config_loader.load_config(config_path)
     
     print(f"Capturing {duration_sec} seconds for level validation...")
@@ -138,8 +139,20 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
         return {"error": "Failed to open arecord stdout"}
     
     # Check if process started successfully
-    import time
-    time.sleep(0.1)  # Give arecord a moment to initialize
+    time.sleep(0.2)  # Give arecord more time to initialize
+    
+    # Check stderr immediately for any warnings/errors
+    if proc.stderr:
+        try:
+            import select
+            ready, _, _ = select.select([proc.stderr], [], [], 0.1)
+            if ready:
+                stderr_preview = proc.stderr.read(1024).decode(errors="ignore")
+                if stderr_preview:
+                    print(f"  arecord stderr (initial): {stderr_preview.strip()}")
+        except (OSError, ValueError):
+            pass  # select may not work on all systems or file types
+    
     if proc.poll() is not None:
         # Process exited immediately - check stderr
         stderr_output = ""
@@ -158,6 +171,8 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
     chunk_samples = int(audio_cfg["sample_rate"] * audio_cfg["chunk_duration"])
     chunk_bytes = chunk_samples * monitor.BYTES_PER_SAMPLE * audio_cfg["channels"]
     
+    print(f"  Expected chunk size: {chunk_bytes} bytes ({chunk_samples} samples)")
+    
     start = time.time()
     
     all_samples = []
@@ -165,6 +180,7 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
     rms_values = []
     dc_offsets = []
     chunks_read = 0
+    buffer = b""  # Accumulate data until we have a full chunk
     
     try:
         while time.time() - start < duration_sec:
@@ -174,64 +190,101 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
                 if proc.stderr:
                     stderr_output = proc.stderr.read().decode(errors="ignore")
                 
+                # Check for interrupted system call - this is often recoverable
+                if "Interrupted system call" in stderr_output:
+                    # Process may have been interrupted but device might still work
+                    # Continue trying to read from buffer
+                    if not buffer and not all_samples:
+                        return {"error": f"arecord interrupted: {stderr_output.strip()}"}
+                    # Otherwise, process what we have
+                    break
+                
                 # Provide helpful error message for common "device busy" issue
                 if "Device or resource busy" in stderr_output or "audio open error" in stderr_output:
                     return {
                         "error": "Audio device is busy. The noise-monitor service is likely running and has exclusive access to the device. Stop it first with 'make stop' or 'sudo systemctl stop noise-monitor', then run this check again."
                     }
                 
-                return {"error": f"arecord process exited early. stderr: {stderr_output.strip()}"}
+                # If process exited and we have no data, return error
+                if not all_samples and not buffer:
+                    return {"error": f"arecord process exited early. stderr: {stderr_output.strip()}"}
+                # Otherwise, break to process what we have
+                break
             
-            data = proc.stdout.read(chunk_bytes)
+            # Read available data (may be less than chunk_bytes)
+            try:
+                data = proc.stdout.read(chunk_bytes)
+            except (IOError, OSError) as e:
+                # Handle interrupted system calls
+                import errno
+                if e.errno == errno.EINTR:
+                    # Interrupted, try again
+                    time.sleep(0.01)
+                    continue
+                else:
+                    # Other error
+                    return {"error": f"Error reading from arecord: {e}"}
+            
             if not data:
                 # No data available yet, wait a bit
                 time.sleep(0.01)
                 continue
             
-            if len(data) < chunk_bytes:
-                # Partial chunk - wait for more or break if process ended
-                if proc.poll() is not None:
-                    break
-                time.sleep(0.01)
-                continue
+            # Add to buffer
+            buffer += data
             
-            samples = np.frombuffer(data, dtype="<i2").astype(np.float32) / monitor.INT16_FULL_SCALE
-            if len(samples) == 0:
-                continue
-            
-            # Check for clipping (samples at or near full scale)
-            peak = float(np.max(np.abs(samples)))
-            if peak > 0.95:
-                print(f"  ⚠️  WARNING: Clipping detected! Peak: {monitor.dbfs(peak):.1f} dBFS")
-            
-            # DC offset
-            dc = float(np.mean(samples))
-            dc_offsets.append(dc)
-            
-            # RMS
-            rms = float(np.sqrt(np.mean(samples ** 2)))
-            rms_values.append(monitor.dbfs(rms))
-            peak_values.append(monitor.dbfs(peak))
-            
-            all_samples.extend(samples)
-            chunks_read += 1
-            
-            # Print progress
-            elapsed = time.time() - start
-            if chunks_read % 10 == 0:
-                print(f"  Captured {elapsed:.1f}s / {duration_sec:.1f}s ({chunks_read} chunks)...")
+            # Process complete chunks
+            while len(buffer) >= chunk_bytes:
+                chunk_data = buffer[:chunk_bytes]
+                buffer = buffer[chunk_bytes:]
+                
+                samples = np.frombuffer(chunk_data, dtype="<i2").astype(np.float32) / monitor.INT16_FULL_SCALE
+                if len(samples) == 0:
+                    continue
+                
+                # Check for clipping (samples at or near full scale)
+                peak = float(np.max(np.abs(samples)))
+                if peak > 0.95:
+                    print(f"  ⚠️  WARNING: Clipping detected! Peak: {monitor.dbfs(peak):.1f} dBFS")
+                
+                # DC offset
+                dc = float(np.mean(samples))
+                dc_offsets.append(dc)
+                
+                # RMS
+                rms = float(np.sqrt(np.mean(samples ** 2)))
+                rms_values.append(monitor.dbfs(rms))
+                peak_values.append(monitor.dbfs(peak))
+                
+                all_samples.extend(samples)
+                chunks_read += 1
+                
+                # Print progress
+                elapsed = time.time() - start
+                if chunks_read % 10 == 0:
+                    print(f"  Captured {elapsed:.1f}s / {duration_sec:.1f}s ({chunks_read} chunks)...")
     
     finally:
         if proc and proc.poll() is None:
             proc.terminate()
+            time.sleep(0.1)
+            if proc.poll() is None:
+                proc.kill()
         elif proc.poll() is not None and proc.stderr:
             # Process exited - check for errors
             stderr_output = proc.stderr.read().decode(errors="ignore")
-            if stderr_output:
+            if stderr_output and "Interrupted system call" not in stderr_output:
                 print(f"  arecord stderr: {stderr_output.strip()}")
     
     if not all_samples:
-        return {"error": f"No audio captured after {duration_sec}s. Check device: {config['audio']['device']}"}
+        # Final check of stderr
+        stderr_final = ""
+        if proc.stderr:
+            stderr_final = proc.stderr.read().decode(errors="ignore")
+        error_msg = f"No audio captured after {duration_sec}s. Check device: {config['audio']['device']}"
+        if stderr_final:
+            error_msg += f"\narecord stderr: {stderr_final.strip()}"
+        return {"error": error_msg}
     
     print(f"  Captured {chunks_read} chunks ({len(all_samples)} samples)")
     
@@ -249,15 +302,15 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
     abs_samples = np.abs(all_samples)
     noise_floor = float(np.percentile(abs_samples, 10))
     noise_floor_db = monitor.dbfs(noise_floor)
-    
+   
     # Recommendations
     recommendations = []
     
     if max_peak_db > -1.0:
         recommendations.append("⚠️  CLIPPING: Signal is too hot. Reduce input gain or check hardware.")
-    elif max_peak_db < -30.0:
+    elif max_peak_db < -50.0:
         recommendations.append("⚠️  TOO QUIET: Signal is very quiet. Increase input gain or check microphone placement.")
-    elif max_peak_db < -20.0:
+    elif max_peak_db < -40.0:
         recommendations.append("ℹ️  Signal is on the quiet side. Consider increasing gain if events are being missed.")
     
     if dc_offset_db > -40.0:
@@ -266,9 +319,10 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
     if noise_floor_db > -60.0:
         recommendations.append("⚠️  HIGH NOISE FLOOR: Background noise is high. Check for electrical interference or improve shielding.")
     
-    if avg_rms_db < -50.0:
+    # Only show quiet baseline warning if it's extremely quiet
+    if avg_rms_db < -70.0:
         recommendations.append("ℹ️  Very quiet baseline. This is fine for quiet environments, but ensure events are loud enough to trigger.")
-    
+ 
     return {
         "avg_rms_db": avg_rms_db,
         "avg_peak_db": avg_peak_db,
@@ -279,7 +333,6 @@ def validate_capture_levels(config_path: Optional[Path] = None, duration_sec: fl
         "recommendations": recommendations,
         "status": "OK" if not recommendations else "NEEDS_ATTENTION"
     }
-
 
 if __name__ == "__main__":
     import argparse
