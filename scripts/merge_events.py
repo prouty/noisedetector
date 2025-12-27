@@ -191,24 +191,32 @@ def merge_events_csv(
                         if col == 'reviewed' and str(local_val).strip().upper() in ['YES', 'TRUE', '1']:
                             stats['preserved_reviews'] += 1
             
-            merged_rows.append(merged_row)
+            # Convert Series to dict and add timestamp
+            row_dict = merged_row.to_dict()
+            row_dict['start_timestamp'] = timestamp
+            merged_rows.append(row_dict)
             
         elif remote_row is not None:
             # New row from remote (new event from Pi)
             stats['new_from_remote'] += 1
-            merged_rows.append(remote_row)
+            # Convert Series to dict and add timestamp
+            row_dict = remote_row.to_dict()
+            row_dict['start_timestamp'] = timestamp
+            merged_rows.append(row_dict)
             
         elif local_row is not None:
             # Local-only row (manually added entry)
             stats['local_only'] += 1
-            merged_rows.append(local_row)
+            # Convert Series to dict and add timestamp
+            row_dict = local_row.to_dict()
+            row_dict['start_timestamp'] = timestamp
+            merged_rows.append(row_dict)
     
     # Create merged dataframe
     if merged_rows:
         merged_df = pd.DataFrame(merged_rows)
-        # Reset index to make start_timestamp a column again
-        # The index name should be 'start_timestamp', so reset_index will create that column
-        merged_df = merged_df.reset_index()
+        # start_timestamp should already be a column (we added it to each dict)
+        # No need to reset_index since we're not using index for timestamps anymore
         
         # Remove any 'index' column that might have been created (shouldn't happen, but safety check)
         if 'index' in merged_df.columns:

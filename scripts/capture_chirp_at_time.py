@@ -2,14 +2,15 @@
 """
 Retroactively capture and analyze chirps from a specific timestamp.
 
-This script allows you to mark a specific minute (in USA East Coast timezone) as containing
-a chirp, then automatically extracts that minute from the recorded segments, analyzes it,
-and creates events/clips as if it had been detected in real-time.
+This script allows you to manually capture a chirp from a specific timestamp (in USA East Coast timezone).
+It extracts 3 minutes of audio centered on the specified time and creates a clip, bypassing event detection
+(since you manually confirmed the chirp was there).
 
 Usage:
     python3 scripts/capture_chirp_at_time.py "2025-01-15 14:30"
     python3 scripts/capture_chirp_at_time.py "2025-01-15T14:30:00"
-    python3 scripts/capture_chirp_at_time.py "2025-01-15 14:30" --force-chirp  # Force mark as chirp even if classifier says no
+    
+Note: The --force-chirp flag is now the default behavior (always marks as chirp for manual captures).
 """
 import sys
 import wave
@@ -23,11 +24,7 @@ import pytz
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
-from core.repository import EventRepository, SegmentRepository
-from core.detector import EventDetector, Event
-from core.baseline import BaselineTracker
-from core.classifier import create_classifier, Classifier
-from core.audio import AudioChunk
+from core.repository import EventRepository
 import monitor  # For dbfs function
 
 
@@ -105,13 +102,20 @@ def find_segment_file(target_time: datetime, segments_dir: Path) -> Optional[Pat
     return None
 
 
-def extract_minute_from_segment(
+def extract_window_from_segment(
     segment_path: Path,
     target_time: datetime,
-    config: dict
+    config: dict,
+    window_duration_sec: float = 180.0
 ) -> Optional[Tuple[np.ndarray, int, datetime]]:
     """
-    Extract 60 seconds of audio from segment file starting at target_time.
+    Extract audio window (default 3 minutes) centered on target_time from segment file.
+    
+    Args:
+        segment_path: Path to segment WAV file
+        target_time: Target timestamp (center of window)
+        config: Configuration dictionary
+        window_duration_sec: Total duration to extract in seconds (default 180 = 3 minutes)
     
     Returns:
         (samples, sample_rate, actual_start_time) or None if extraction fails
@@ -126,23 +130,35 @@ def extract_minute_from_segment(
             seg_name = segment_path.stem
             seg_start = datetime.strptime(seg_name, "%Y-%m-%d_%H-%M-%S")
             seg_start = EASTERN.localize(seg_start)
+            seg_end = seg_start + timedelta(seconds=300)  # Segments are 300 seconds
             
-            # Calculate offset within segment
-            offset_sec = (target_time - seg_start).total_seconds()
-            if offset_sec < 0 or offset_sec >= 300:  # Segment is 300 seconds
+            # Calculate window: centered on target_time
+            half_window = window_duration_sec / 2.0
+            window_start = target_time - timedelta(seconds=half_window)
+            window_end = target_time + timedelta(seconds=half_window)
+            
+            # Clamp to segment boundaries
+            actual_start = max(window_start, seg_start)
+            actual_end = min(window_end, seg_end)
+            
+            # Calculate offsets within segment
+            start_offset_sec = (actual_start - seg_start).total_seconds()
+            end_offset_sec = (actual_end - seg_start).total_seconds()
+            actual_duration_sec = (actual_end - actual_start).total_seconds()
+            
+            if start_offset_sec < 0 or start_offset_sec >= 300:
                 print(f"[ERROR] Target time {target_time} is outside segment range")
                 return None
             
-            # Calculate byte position
-            bytes_per_sample = sample_width * channels
-            offset_bytes = int(offset_sec * sr * bytes_per_sample)
+            if actual_duration_sec <= 0:
+                print(f"[ERROR] Invalid duration: {actual_duration_sec} seconds")
+                return None
             
-            # Seek to position
-            wf.setpos(int(offset_sec * sr))
+            # Seek to start position
+            wf.setpos(int(start_offset_sec * sr))
             
-            # Read 60 seconds
-            duration_sec = 60.0
-            num_samples = int(sr * duration_sec)
+            # Read the window
+            num_samples = int(sr * actual_duration_sec)
             frames = wf.readframes(num_samples)
             
             if len(frames) == 0:
@@ -165,7 +181,9 @@ def extract_minute_from_segment(
             # Remove DC offset
             samples = samples - np.mean(samples)
             
-            return samples, sr, target_time
+            print(f"[INFO] Extracted {actual_duration_sec:.1f} seconds: {actual_start.strftime('%H:%M:%S')} to {actual_end.strftime('%H:%M:%S')}")
+            
+            return samples, sr, actual_start
             
     except Exception as e:
         print(f"[ERROR] Failed to extract audio from segment: {e}")
@@ -174,115 +192,76 @@ def extract_minute_from_segment(
         return None
 
 
-def process_audio_minute(
+def create_clip_from_audio(
     samples: np.ndarray,
     sample_rate: int,
     start_time: datetime,
     config: dict,
-    classifier: Optional[Classifier],
-    force_chirp: bool = False
-) -> List[dict]:
+    target_time: datetime
+) -> Optional[dict]:
     """
-    Process 60 seconds of audio through event detection and classification.
+    Create a clip directly from audio samples, bypassing event detection.
+    
+    Since the user manually specified this time, we trust them and create the clip
+    regardless of whether the detector would have triggered.
     
     Returns:
-        List of event records (ready to save to events.csv)
+        Event record dictionary ready to save to events.csv
     """
-    chunk_duration = config["audio"]["chunk_duration"]
-    chunk_samples = int(sample_rate * chunk_duration)
-    bytes_per_sample = 2  # int16
-    chunk_bytes = chunk_samples * bytes_per_sample
+    import wave
+    import monitor
     
-    # Initialize components
-    baseline_tracker = BaselineTracker(config)
-    event_detector = EventDetector(config, baseline_tracker)
-    event_repo = EventRepository(config)
-    segment_repo = SegmentRepository(config)
+    # Calculate audio statistics for the record
+    rms = float(np.sqrt(np.mean(samples ** 2)))
+    peak = float(np.max(np.abs(samples)))
+    rms_db = monitor.dbfs(rms)
+    peak_db = monitor.dbfs(peak)
     
-    events_found = []
-    current_time = start_time
+    # Convert samples back to int16 bytes for saving
+    samples_int16 = (samples * 32768.0).astype(np.int16)
+    audio_bytes = samples_int16.tobytes()
     
-    # Process audio in chunks
-    num_chunks = len(samples) // chunk_samples
+    # Calculate duration
+    duration_sec = len(samples) / float(sample_rate)
+    end_time = start_time + timedelta(seconds=duration_sec)
     
-    print(f"[INFO] Processing {num_chunks} chunks from {start_time.strftime('%Y-%m-%d %H:%M:%S')} EST")
+    # Save clip
+    clips_dir = Path(config["event_clips"]["clips_dir"])
+    clips_dir.mkdir(parents=True, exist_ok=True)
     
-    for i in range(num_chunks):
-        chunk_start = i * chunk_samples
-        chunk_end = chunk_start + chunk_samples
-        chunk_samples_data = samples[chunk_start:chunk_end]
-        
-        # Convert to int16 bytes for processing
-        chunk_int16 = (chunk_samples_data * 32768.0).astype(np.int16)
-        chunk_bytes_data = chunk_int16.tobytes()
-        
-        # Create AudioChunk
-        chunk_timestamp = (start_time + timedelta(seconds=i * chunk_duration)).timestamp()
-        chunk = AudioChunk(
-            samples=chunk_samples_data,
-            raw_bytes=chunk_bytes_data,
-            sample_rate=sample_rate,
-            timestamp=chunk_timestamp
-        )
-        
-        # Process through event detector
-        event = event_detector.process_chunk(chunk, chunk_bytes_data)
-        
-        if event:
-            # Process event (classify and save)
-            clip_path = segment_repo.save_clip(event.start_time, event.chunks)
-            
-            # Classify
-            is_chirp = force_chirp  # If force_chirp, skip classification
-            similarity = None
-            confidence = None
-            rejection_reason = None
-            
-            if classifier and not force_chirp:
-                actual_chunks = event.chunks[event.actual_start_idx:]
-                duration_sec = (event.end_time - event.start_time).total_seconds()
-                
-                if actual_chunks:
-                    try:
-                        is_chirp, similarity, confidence, rejection_reason = classifier.classify(
-                            actual_chunks,
-                            duration_sec,
-                            config
-                        )
-                    except Exception as e:
-                        print(f"[WARN] Classification failed: {e}")
-            
-            if force_chirp:
-                is_chirp = True
-                confidence = 1.0  # High confidence when forced
-            
-            # Build event record
-            event_record = {
-                "start_timestamp": event.start_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "end_timestamp": event.end_time.strftime("%Y-%m-%dT%H:%M:%S"),
-                "duration_sec": (event.end_time - event.start_time).total_seconds(),
-                "max_peak_db": event.max_peak_db,
-                "max_rms_db": event.max_rms_db,
-                "baseline_rms_db": event.baseline_rms_db,
-                "segment_file": "",  # Not from live segment
-                "segment_offset_sec": 0.0,
-                "is_chirp": is_chirp,
-                "chirp_similarity": similarity,
-                "confidence": confidence,
-                "rejection_reason": rejection_reason or "",
-                "clip_file": str(clip_path),
-            }
-            
-            events_found.append(event_record)
-            
-            # Save to events.csv
-            try:
-                event_repo.save(event_record)
-                print(f"[EVENT] Saved event: {event_record['start_timestamp']} - {'CHIRP' if is_chirp else 'noise'}")
-            except Exception as e:
-                print(f"[ERROR] Failed to save event: {e}")
+    # Use target_time for filename (the time user specified, not actual start)
+    clip_filename = target_time.strftime("clip_%Y-%m-%d_%H-%M-%S.wav")
+    clip_path = clips_dir / clip_filename
     
-    return events_found
+    # Write WAV file
+    channels = config["audio"]["channels"]
+    with wave.open(str(clip_path), "wb") as wf:
+        wf.setnchannels(channels)
+        wf.setsampwidth(2)  # int16 = 2 bytes
+        wf.setframerate(sample_rate)
+        wf.writeframes(audio_bytes)
+    
+    print(f"[CLIP] Saved clip: {clip_path.name} ({duration_sec:.1f}s)")
+    
+    # Build event record
+    # Use target_time as the event timestamp (what user specified)
+    event_record = {
+        "start_timestamp": target_time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "end_timestamp": (target_time + timedelta(seconds=duration_sec)).strftime("%Y-%m-%dT%H:%M:%S"),
+        "duration_sec": duration_sec,
+        "max_peak_db": peak_db,
+        "max_rms_db": rms_db,
+        "baseline_rms_db": None,  # Not applicable for manual capture
+        "segment_file": "",  # Not from live segment
+        "segment_offset_sec": 0.0,
+        "is_chirp": True,  # Always mark as chirp for manual captures
+        "chirp_similarity": None,
+        "confidence": 1.0,  # High confidence - user confirmed it
+        "rejection_reason": "",
+        "clip_file": str(clip_path),
+    }
+    
+    return event_record
 
 
 def capture_chirp_at_time(
@@ -333,35 +312,38 @@ def capture_chirp_at_time(
     
     print(f"[INFO] Found segment: {segment_file.name}")
     
-    # Extract minute of audio
-    result = extract_minute_from_segment(segment_file, target_time, config)
+    # Extract 3 minutes (180 seconds) centered on target time
+    result = extract_window_from_segment(segment_file, target_time, config, window_duration_sec=180.0)
     if result is None:
         return False
     
     samples, sample_rate, actual_start = result
-    print(f"[INFO] Extracted {len(samples)/sample_rate:.1f} seconds of audio")
     
-    # Load classifier (factory function returns appropriate type)
-    classifier = create_classifier(config)
-    
-    # Process audio
-    events = process_audio_minute(
+    # Create clip directly (bypass detection - user manually specified this time)
+    event_record = create_clip_from_audio(
         samples,
         sample_rate,
         actual_start,
         config,
-        classifier,
-        force_chirp=force_chirp
+        target_time  # Use target_time for event timestamp
     )
     
-    if not events:
-        print(f"[WARN] No events detected in the specified minute")
-        if force_chirp:
-            print(f"[INFO] Use --force-chirp to create a manual event even if nothing is detected")
+    if event_record is None:
+        print(f"[ERROR] Failed to create clip")
         return False
     
-    chirps = [e for e in events if e.get("is_chirp")]
-    print(f"\n[SUCCESS] Processed {len(events)} event(s), {len(chirps)} chirp(s)")
+    # Save to events.csv
+    event_repo = EventRepository(config)
+    try:
+        event_repo.save(event_record)
+        print(f"[EVENT] Saved event: {event_record['start_timestamp']} - CHIRP (manual capture)")
+    except Exception as e:
+        print(f"[ERROR] Failed to save event: {e}")
+        return False
+    
+    print(f"\n[SUCCESS] Created clip and saved event")
+    print(f"  Clip: {event_record['clip_file']}")
+    print(f"  Duration: {event_record['duration_sec']:.1f} seconds")
     print(f"  Events saved to: {config['event_detection']['events_file']}")
     print(f"  Clips saved to: {config['event_clips']['clips_dir']}")
     
@@ -386,15 +368,16 @@ Examples:
     )
     parser.add_argument("timestamp", help="Timestamp in USA East Coast timezone (e.g., '2025-01-15 14:30')")
     parser.add_argument("--config", type=Path, help="Path to config.json")
-    parser.add_argument("--force-chirp", action="store_true", 
-                       help="Force mark all detected events as chirps (skip classification)")
+    # Note: force_chirp is now always True for manual captures, but keep flag for backward compatibility
+    parser.add_argument("--force-chirp", action="store_true", default=True,
+                       help="Always mark as chirp for manual captures (default: True)")
     
     args = parser.parse_args()
     
     success = capture_chirp_at_time(
         args.timestamp,
         config_path=args.config,
-        force_chirp=args.force_chirp
+        force_chirp=True  # Always True for manual captures
     )
     
     sys.exit(0 if success else 1)

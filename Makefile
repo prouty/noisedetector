@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: help pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core capture-chirp
+.PHONY: help pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core capture-chirp extract-segment
 
 help:
 	@echo "Noise Detector - Makefile Commands"
@@ -49,6 +49,7 @@ help:
 	@echo "  make health             System health check (dependencies, config, disk)"
 	@echo "  make audio-check        Validate audio capture levels on Pi"
 	@echo "  make capture-chirp       Retroactively capture chirp from specific timestamp (on Pi)"
+	@echo "  make extract-segment     Extract specific segment from a clip file"
 	@echo "  make debug-state        Show current system state"
 	@echo ""
 	@echo "Baseline Management:"
@@ -612,3 +613,16 @@ capture-chirp:
 		exit 1; \
 	fi
 	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/capture_chirp_at_time.py "$(TIME)"'
+
+extract-segment:
+	@echo "==> Extracting segment from clip..."
+	@if [ -z "$(CLIP)" ] || [ -z "$(START)" ] || [ -z "$(END)" ]; then \
+		echo "Error: CLIP, START, and END must be set."; \
+		echo "  Example: make extract-segment CLIP=clips/clip_2025-12-27_14-30-00.wav START=45 END=55"; \
+		echo "  Optional: PADDING=5 (default: 2 seconds)"; \
+		echo "  Optional: UPDATE_EVENTS=1 (update events.csv)"; \
+		exit 1; \
+	fi
+	@PADDING=$${PADDING:-2}; \
+	UPDATE_FLAG=$$([ -n "$$UPDATE_EVENTS" ] && echo "--update-events" || echo ""); \
+	python3 scripts/extract_chirp_segment.py "$(CLIP)" $(START) $(END) --padding $$PADDING $$UPDATE_FLAG
