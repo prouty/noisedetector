@@ -26,7 +26,7 @@ import config_loader
 from core.repository import EventRepository, SegmentRepository
 from core.detector import EventDetector, Event
 from core.baseline import BaselineTracker
-from core.classifier import ChirpClassifier
+from core.classifier import create_classifier, Classifier
 from core.audio import AudioChunk
 import monitor  # For dbfs function
 
@@ -179,7 +179,7 @@ def process_audio_minute(
     sample_rate: int,
     start_time: datetime,
     config: dict,
-    classifier: Optional[ChirpClassifier],
+    classifier: Optional[Classifier],
     force_chirp: bool = False
 ) -> List[dict]:
     """
@@ -341,8 +341,8 @@ def capture_chirp_at_time(
     samples, sample_rate, actual_start = result
     print(f"[INFO] Extracted {len(samples)/sample_rate:.1f} seconds of audio")
     
-    # Load classifier
-    classifier = ChirpClassifier(config)
+    # Load classifier (factory function returns appropriate type)
+    classifier = create_classifier(config)
     
     # Process audio
     events = process_audio_minute(
