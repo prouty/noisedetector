@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: help pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core
+.PHONY: help pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core capture-chirp
 
 help:
 	@echo "Noise Detector - Makefile Commands"
@@ -48,6 +48,7 @@ help:
 	@echo "  make chirps-recent      Show chirps from last 24 hours"
 	@echo "  make health             System health check (dependencies, config, disk)"
 	@echo "  make audio-check        Validate audio capture levels on Pi"
+	@echo "  make capture-chirp       Retroactively capture chirp from specific timestamp (on Pi)"
 	@echo "  make debug-state        Show current system state"
 	@echo ""
 	@echo "Baseline Management:"
@@ -602,3 +603,12 @@ email-timer-off: email-timer-stop email-timer-disable
 	@echo "==> Email timer stopped and disabled"
 
 workflow: pull report
+
+capture-chirp:
+	@echo "==> Capturing chirp from specified timestamp on Pi..."
+	@if [ -z "$(TIME)" ]; then \
+		echo "Error: TIME not set. Example: make capture-chirp TIME='2025-01-15 14:30'"; \
+		echo "  Time should be in USA East Coast timezone (EST/EDT)"; \
+		exit 1; \
+	fi
+	@ssh $(PI_HOST) 'cd $(PI_DIR) && python3 scripts/capture_chirp_at_time.py "$(TIME)"'
