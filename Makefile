@@ -47,6 +47,8 @@ help:
 	@echo "Quick Status & Analysis:"
 	@echo "  make chirps             Show detected chirps in events.csv"
 	@echo "  make chirps-recent      Show chirps from last 24 hours"
+	@echo "  make events             Show recent events from events.csv"
+	@echo "  make events-recent      Show events from last 24 hours"
 	@echo "  make health             System health check (dependencies, config, disk)"
 	@echo "  make audio-check        Validate audio capture levels on Pi"
 	@echo "  make capture-chirp       Retroactively capture chirp from specific timestamp (on Pi)"
@@ -484,6 +486,14 @@ chirps:
 chirps-recent:
 	@echo "==> Checking for recent chirps (last 24 hours)..."
 	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/check_chirps.py --recent 24
+
+events:
+	@echo "==> Showing recent events from events.csv..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/show_events.py --limit 20
+
+events-recent:
+	@echo "==> Showing events from last 24 hours..."
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/show_events.py --recent 24
 
 health:
 	@echo "==> Running system health check on Pi..."
