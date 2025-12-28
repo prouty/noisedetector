@@ -9,7 +9,7 @@ PI_HOST ?= $(PI_USER)@$(PI_HOSTNAME)
 PI_DIR ?= /home/$(PI_USER)/projects/noisedetector
 LOCAL_DIR ?= $(HOME)/projects/noisedetector
 
-.PHONY: help pull pull-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core capture-chirp extract-segment
+.PHONY: help pull pull-chirps pull-manual-chirps pull-not-chirps train train-ml train-ml-svm train-capture-ml deploy deploy-ml deploy-restart deploy-ml-restart restart reload stop start status logs logs-refactored fix-deps report rediagnose rediagnose-report compare-classifiers mark-chirp mark-chirp-latest mark-not-chirp mark-not-chirp-latest evaluate audio-check chirps chirps-recent health baseline-list baseline-create baseline-delete baseline-switch baseline-show baseline-analyze baseline-validate baseline-set baseline-set-duration debug-state init shell email-report email-report-test install-email-timer email-timer-status email-timer-logs workflow test test-capture-ml test-features test-email test-reporting test-core capture-chirp extract-segment
 
 help:
 	@echo "Noise Detector - Makefile Commands"
@@ -26,6 +26,7 @@ help:
 	@echo "Data & Reports:"
 	@echo "  make pull               Pull events.csv and clips (<=10s) from Pi"
 	@echo "  make pull-chirps        Pull only clips identified as chirps"
+	@echo "  make pull-manual-chirps Pull manually captured chirp clips (3min)"
 	@echo "  make pull-not-chirps    Pull only non-chirp clips"
 	@echo "  make report             Generate chirp report from events.csv"
 	@echo "  make workflow           Pull data + generate report"
@@ -199,6 +200,30 @@ pull-chirps:
 		echo "==> No chirps found in events.csv"; \
 	fi
 	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/chirp_clips.txt
+
+pull-manual-chirps:
+	@echo "==> Pulling events.csv to identify manually captured chirps (3min clips)..."
+	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
+	@echo "==> Extracting manually captured chirp clip filenames (duration >= 180s)..."
+	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_manual_chirps.py data/events.csv.tmp > /tmp/manual_chirp_clips.txt
+	@if [ -s /tmp/manual_chirp_clips.txt ]; then \
+		echo "==> Filtering out clips that already exist locally..."; \
+		cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/filter_existing_clips.py < /tmp/manual_chirp_clips.txt > /tmp/new_manual_chirp_clips.txt 2> /tmp/filter_summary.txt; \
+		if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
+		if [ ! -s /tmp/new_manual_chirp_clips.txt ]; then \
+			echo "==> All manually captured chirp clips already exist locally"; \
+		else \
+			new_count=$$(wc -l < /tmp/new_manual_chirp_clips.txt | tr -d ' '); \
+			echo "==> Transferring $$new_count manually captured chirp clips..."; \
+			rsync -avz --files-from=/tmp/new_manual_chirp_clips.txt \
+				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
+			echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/"; \
+		fi; \
+		rm -f /tmp/new_manual_chirp_clips.txt /tmp/filter_summary.txt; \
+	else \
+		echo "==> No manually captured chirps found in events.csv"; \
+	fi
+	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/manual_chirp_clips.txt
 
 pull-not-chirps:
 	@echo "==> Pulling events.csv to identify non-chirps..."
@@ -625,4 +650,7 @@ extract-segment:
 	fi
 	@PADDING=$${PADDING:-2}; \
 	UPDATE_FLAG=$$([ -n "$$UPDATE_EVENTS" ] && echo "--update-events" || echo ""); \
-	python3 scripts/extract_chirp_segment.py "$(CLIP)" $(START) $(END) --padding $$PADDING $$UPDATE_FLAG
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/extract_chirp_segment.py "$(CLIP)" $(START) $(END) --padding $$PADDING $$UPDATE_FLAG
+
+open-events:
+	open -a "Microsoft Excel" data/events.csv
