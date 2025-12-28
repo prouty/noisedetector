@@ -32,27 +32,51 @@ class EventRepository:
         self._ensure_header()
     
     def _ensure_header(self) -> None:
-        """Ensure CSV file has header row."""
+        """Ensure CSV file has header row with all required columns."""
+        expected_columns = [
+            "start_timestamp",
+            "end_timestamp",
+            "duration_sec",
+            "max_peak_db",
+            "max_rms_db",
+            "baseline_rms_db",
+            "segment_file",
+            "segment_offset_sec",
+            "clip_file",
+            "is_chirp",
+            "chirp_similarity",
+            "confidence",
+            "rejection_reason",
+            "reviewed",
+            "manual_capture",
+        ]
+        
         if not self.events_file.exists():
+            # Create new file with header
             self.events_file.parent.mkdir(parents=True, exist_ok=True)
             with self.events_file.open("w", newline="") as f:
                 writer = csv.writer(f)
-                writer.writerow([
-                    "start_timestamp",
-                    "end_timestamp",
-                    "duration_sec",
-                    "max_peak_db",
-                    "max_rms_db",
-                    "baseline_rms_db",
-                    "segment_file",
-                    "segment_offset_sec",
-                    "clip_file",
-                    "is_chirp",
-                    "chirp_similarity",
-                    "confidence",
-                    "rejection_reason",
-                    "reviewed",
-                ])
+                writer.writerow(expected_columns)
+        else:
+            # Check if file exists but is missing the manual_capture column
+            try:
+                with self.events_file.open("r", newline="") as f:
+                    reader = csv.reader(f)
+                    header = next(reader, None)
+                    if header and "manual_capture" not in header:
+                        # Need to add the column - read all rows and rewrite
+                        import pandas as pd
+                        df = pd.read_csv(self.events_file)
+                        if "manual_capture" not in df.columns:
+                            df["manual_capture"] = "FALSE"
+                            # Reorder columns to match expected order
+                            existing_cols = [col for col in expected_columns if col in df.columns]
+                            extra_cols = [col for col in df.columns if col not in expected_columns]
+                            df = df[existing_cols + extra_cols]
+                            df.to_csv(self.events_file, index=False)
+            except Exception as e:
+                # If we can't read/update, just continue - save() will handle it
+                pass
     
     def save(self, event: Dict[str, Any]) -> None:
         """
@@ -79,6 +103,7 @@ class EventRepository:
                     f"{event.get('confidence', 0.0):.3f}" if event.get("confidence") is not None else "",
                     event.get("rejection_reason", ""),
                     event.get("reviewed", ""),
+                    "TRUE" if event.get("manual_capture") else "FALSE",
                 ])
             
             # Print summary

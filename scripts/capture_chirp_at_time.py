@@ -259,6 +259,7 @@ def create_clip_from_audio(
         "confidence": 1.0,  # High confidence - user confirmed it
         "rejection_reason": "",
         "clip_file": str(clip_path),
+        "manual_capture": True,  # Tag as manually captured
     }
     
     return event_record

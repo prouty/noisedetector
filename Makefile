@@ -202,16 +202,23 @@ pull-chirps:
 	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/chirp_clips.txt
 
 pull-manual-chirps:
-	@echo "==> Pulling events.csv to identify manually captured chirps (3min clips)..."
+	@echo "==> Pulling events.csv to identify manually captured chirps..."
 	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
-	@echo "==> Extracting manually captured chirp clip filenames (duration >= 180s)..."
+	@echo "==> Extracting manually captured chirp clip filenames (tagged with manual_capture=TRUE)..."
 	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_manual_chirps.py data/events.csv.tmp > /tmp/manual_chirp_clips.txt
 	@if [ -s /tmp/manual_chirp_clips.txt ]; then \
+		total_manual=$$(wc -l < /tmp/manual_chirp_clips.txt | tr -d ' '); \
+		echo "==> Found $$total_manual manually captured chirp clip(s):"; \
+		while IFS= read -r clip || [ -n "$$clip" ]; do \
+			clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+			if [ -n "$$clip" ]; then echo "    - $$clip"; fi; \
+		done < /tmp/manual_chirp_clips.txt; \
 		echo "==> Filtering out clips that already exist locally..."; \
 		cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/filter_existing_clips.py < /tmp/manual_chirp_clips.txt > /tmp/new_manual_chirp_clips.txt 2> /tmp/filter_summary.txt; \
 		if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
 		if [ ! -s /tmp/new_manual_chirp_clips.txt ]; then \
-			echo "==> All manually captured chirp clips already exist locally"; \
+			echo "==> All $$total_manual manually captured chirp clip(s) already exist locally"; \
+			echo "    (Use 'make pull-chirps' to re-pull all chirps, or manually rsync specific clips)"; \
 		else \
 			new_count=$$(wc -l < /tmp/new_manual_chirp_clips.txt | tr -d ' '); \
 			echo "==> Transferring $$new_count manually captured chirp clips..."; \
