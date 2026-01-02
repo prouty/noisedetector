@@ -337,6 +337,14 @@ def mark_clip(
         print(f"[ERROR] Clip file not found: {clip_path}")
         return False
     
+    # Validate that the path is a file, not a directory
+    if not clip_path.is_file():
+        print(f"[ERROR] Path is not a file: {clip_path}")
+        if clip_path.is_dir():
+            print(f"  This is a directory. Please specify a specific clip file, e.g.:")
+            print(f"  make mark-chirp CLIP=clips/clip_2025-01-01_12-00-00.wav")
+        return False
+    
     # Determine target directory and pattern
     if is_chirp:
         target_dir = Path("training/chirp")
