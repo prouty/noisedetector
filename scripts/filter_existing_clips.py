@@ -5,6 +5,7 @@ Filter out clip filenames that already exist in local directories.
 Reads clip filenames from stdin (one per line) and outputs only those
 that don't exist in any of these directories:
 - clips/
+- clips/manual/
 - training/review/
 - training/chirp/
 - training/not_chirp/
@@ -21,6 +22,7 @@ def clip_exists_locally(clip_filename: str, project_root: Path) -> bool:
     # Directories to check
     check_dirs = [
         project_root / "clips",
+        project_root / "clips" / "manual",  # Manual captures
         project_root / "training" / "review",
         project_root / "training" / "chirp",
         project_root / "training" / "not_chirp",

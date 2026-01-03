@@ -204,15 +204,16 @@ pull-chirps:
 	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/chirp_clips.txt
 
 pull-manual-chirps:
-	@echo "==> Pulling events.csv to identify manually captured chirps..."
-	@rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1
-	@echo "==> Extracting manually captured chirp clip filenames (tagged with manual_capture=TRUE)..."
-	@cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_manual_chirps.py data/events.csv.tmp > /tmp/manual_chirp_clips.txt
-	@if [ -s /tmp/manual_chirp_clips.txt ]; then \
-		total_manual=$$(wc -l < /tmp/manual_chirp_clips.txt | tr -d ' '); \
+	@bash -c '\
+	echo "==> Pulling events.csv to identify manually captured chirps..."; \
+	rsync -avz $(PI_HOST):$(PI_DIR)/data/events.csv $(LOCAL_DIR)/data/events.csv.tmp > /dev/null 2>&1; \
+	echo "==> Extracting manually captured chirp clip filenames (tagged with manual_capture=TRUE)..."; \
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/pull_manual_chirps.py data/events.csv.tmp > /tmp/manual_chirp_clips.txt; \
+	if [ -s /tmp/manual_chirp_clips.txt ]; then \
+		total_manual=$$(wc -l < /tmp/manual_chirp_clips.txt | tr -d " "); \
 		echo "==> Found $$total_manual manually captured chirp clip(s):"; \
 		while IFS= read -r clip || [ -n "$$clip" ]; do \
-			clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+			clip=$$(echo "$$clip" | tr -d "\r\n" | xargs); \
 			if [ -n "$$clip" ]; then echo "    - $$clip"; fi; \
 		done < /tmp/manual_chirp_clips.txt; \
 		echo "==> Filtering out clips that already exist locally..."; \
@@ -220,19 +221,26 @@ pull-manual-chirps:
 		if [ -s /tmp/filter_summary.txt ]; then cat /tmp/filter_summary.txt; fi; \
 		if [ ! -s /tmp/new_manual_chirp_clips.txt ]; then \
 			echo "==> All $$total_manual manually captured chirp clip(s) already exist locally"; \
-			echo "    (Use 'make pull-chirps' to re-pull all chirps, or manually rsync specific clips)"; \
+			echo "    (Use '\''make pull-chirps'\'' to re-pull all chirps, or manually rsync specific clips)"; \
 		else \
-			new_count=$$(wc -l < /tmp/new_manual_chirp_clips.txt | tr -d ' '); \
+			new_count=$$(wc -l < /tmp/new_manual_chirp_clips.txt | tr -d " "); \
 			echo "==> Transferring $$new_count manually captured chirp clips..."; \
-			rsync -avz --files-from=/tmp/new_manual_chirp_clips.txt \
-				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-			echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/"; \
+			mkdir -p $(LOCAL_DIR)/clips/manual; \
+			if ssh $(PI_HOST) "test -d $(PI_DIR)/clips/manual" 2>/dev/null; then \
+				rsync -avz --files-from=/tmp/new_manual_chirp_clips.txt \
+					$(PI_HOST):$(PI_DIR)/clips/manual/ $(LOCAL_DIR)/clips/manual/; \
+				echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/"; \
+			else \
+				echo "==> clips/manual/ directory does not exist on Pi"; \
+				echo "    This means no manual clips have been captured yet (or they'\''re in the old location)"; \
+				echo "    Manual clips are now saved to clips/manual/ when captured"; \
+			fi; \
 		fi; \
 		rm -f /tmp/new_manual_chirp_clips.txt /tmp/filter_summary.txt; \
 	else \
 		echo "==> No manually captured chirps found in events.csv"; \
-	fi
-	@rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/manual_chirp_clips.txt
+	fi; \
+	rm -f $(LOCAL_DIR)/data/events.csv.tmp /tmp/manual_chirp_clips.txt'
 
 pull-not-chirps:
 	@echo "==> Pulling events.csv to identify non-chirps..."

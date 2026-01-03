@@ -319,6 +319,9 @@ def mark_clip(
         # Strategy 2: Try relative to clips directory (just filename)
         elif (clips_dir / clip_path.name).exists():
             clip_path = clips_dir / clip_path.name
+        # Strategy 2b: Try relative to clips/manual directory (just filename)
+        elif (clips_dir / "manual" / clip_path.name).exists():
+            clip_path = clips_dir / "manual" / clip_path.name
         # Strategy 3: Try as-is (relative to current directory)
         elif clip_path.exists():
             clip_path = clip_path.resolve()
@@ -331,6 +334,7 @@ def mark_clip(
                 print(f"[ERROR] Clip file not found: {clip_path}")
                 print(f"  Tried: {project_root / clip_path}")
                 print(f"  Tried: {clips_dir / clip_path.name}")
+                print(f"  Tried: {clips_dir / 'manual' / clip_path.name}")
                 return False
     
     if not clip_path.exists():

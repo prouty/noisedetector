@@ -225,13 +225,14 @@ def create_clip_from_audio(
     duration_sec = len(samples) / float(sample_rate)
     end_time = start_time + timedelta(seconds=duration_sec)
     
-    # Save clip
+    # Save clip to clips/manual/ directory to distinguish from automatic captures
     clips_dir = Path(config["event_clips"]["clips_dir"])
-    clips_dir.mkdir(parents=True, exist_ok=True)
+    manual_clips_dir = clips_dir / "manual"
+    manual_clips_dir.mkdir(parents=True, exist_ok=True)
     
     # Use target_time for filename (the time user specified, not actual start)
     clip_filename = target_time.strftime("clip_%Y-%m-%d_%H-%M-%S.wav")
-    clip_path = clips_dir / clip_filename
+    clip_path = manual_clips_dir / clip_filename
     
     # Write WAV file
     channels = config["audio"]["channels"]
@@ -346,7 +347,9 @@ def capture_chirp_at_time(
     print(f"  Clip: {event_record['clip_file']}")
     print(f"  Duration: {event_record['duration_sec']:.1f} seconds")
     print(f"  Events saved to: {config['event_detection']['events_file']}")
-    print(f"  Clips saved to: {config['event_clips']['clips_dir']}")
+    # Extract directory from clip_file path
+    clip_file_path = Path(event_record['clip_file'])
+    print(f"  Clips saved to: {clip_file_path.parent}")
     
     return True
 
