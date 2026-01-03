@@ -6,41 +6,64 @@ After manually capturing a 3-minute clip, use this script to extract just the
 chirp portion (with padding before/after) into a shorter, shareable clip.
 
 Usage:
-    # Extract seconds 45-55 from a clip (with 2s padding = 43-57)
-    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55
+    # Extract segment at 50% of clip duration (5s before/after that point)
+    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav --percent 50
     
-    # Custom padding (5 seconds before/after)
-    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55 --padding 5
+    # Prompt for percentage if not provided
+    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav
     
     # Update events.csv to point to the new clip
-    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55 --update-events
+    python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav --percent 50 --update-events
 """
 import sys
 import wave
 import argparse
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Optional
 
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 import config_loader
 
 
+def get_clip_duration(clip_path: Path) -> Optional[float]:
+    """
+    Get the duration of a clip file in seconds.
+    
+    Args:
+        clip_path: Path to clip file
+    
+    Returns:
+        Duration in seconds, or None if error
+    """
+    if not clip_path.exists():
+        print(f"[ERROR] Clip file not found: {clip_path}")
+        return None
+    
+    try:
+        with wave.open(str(clip_path), "rb") as wf:
+            sample_rate = wf.getframerate()
+            total_frames = wf.getnframes()
+            duration = total_frames / float(sample_rate)
+            return duration
+    except Exception as e:
+        print(f"[ERROR] Failed to read clip: {e}")
+        return None
+
+
 def extract_segment_from_clip(
     clip_path: Path,
-    start_sec: float,
-    end_sec: float,
-    padding_sec: float = 2.0,
+    center_sec: float,
+    padding_sec: float = 5.0,
     output_path: Optional[Path] = None
 ) -> Optional[Path]:
     """
-    Extract a segment from a clip file.
+    Extract a segment from a clip file centered at a specific point.
     
     Args:
         clip_path: Path to source clip file
-        start_sec: Start time in seconds (from beginning of clip)
-        end_sec: End time in seconds (from beginning of clip)
-        padding_sec: Seconds to add before start and after end
+        center_sec: Center point in seconds (from beginning of clip)
+        padding_sec: Seconds to extract before and after center point (default: 5.0)
         output_path: Optional output path (default: adds _segment suffix)
     
     Returns:
@@ -50,8 +73,8 @@ def extract_segment_from_clip(
         print(f"[ERROR] Clip file not found: {clip_path}")
         return None
     
-    if start_sec < 0 or end_sec <= start_sec:
-        print(f"[ERROR] Invalid time range: {start_sec} to {end_sec}")
+    if center_sec < 0:
+        print(f"[ERROR] Invalid center point: {center_sec}")
         return None
     
     try:
@@ -62,18 +85,13 @@ def extract_segment_from_clip(
             total_frames = wf.getnframes()
             total_duration = total_frames / float(sample_rate)
             
-            # Validate time range
-            if end_sec > total_duration:
-                print(f"[WARN] End time {end_sec}s exceeds clip duration {total_duration:.1f}s, using clip end")
-                end_sec = total_duration
-            
-            # Apply padding
-            padded_start = max(0.0, start_sec - padding_sec)
-            padded_end = min(total_duration, end_sec + padding_sec)
+            # Calculate start and end times
+            start_sec = max(0.0, center_sec - padding_sec)
+            end_sec = min(total_duration, center_sec + padding_sec)
             
             # Calculate frame positions
-            start_frame = int(padded_start * sample_rate)
-            end_frame = int(padded_end * sample_rate)
+            start_frame = int(start_sec * sample_rate)
+            end_frame = int(end_sec * sample_rate)
             num_frames = end_frame - start_frame
             
             # Seek to start position
@@ -100,7 +118,8 @@ def extract_segment_from_clip(
                 out_wf.writeframes(frames)
             
             actual_duration = num_frames / float(sample_rate)
-            print(f"[SUCCESS] Extracted segment: {padded_start:.1f}s - {padded_end:.1f}s ({actual_duration:.1f}s)")
+            print(f"[SUCCESS] Extracted segment: {start_sec:.1f}s - {end_sec:.1f}s ({actual_duration:.1f}s)")
+            print(f"  Center point: {center_sec:.1f}s ({center_sec/total_duration*100:.1f}% of clip)")
             print(f"  Source: {clip_path.name}")
             print(f"  Output: {output_path.name}")
             
@@ -175,29 +194,26 @@ def update_events_csv(
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Extract a specific segment from a clip file",
+        description="Extract a specific segment from a clip file based on percentage",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Extract seconds 45-55 with default 2s padding (result: 43-57s)
-  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55
+  # Extract segment at 50% of clip duration (5s before/after that point)
+  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav --percent 50
   
-  # Custom padding (5 seconds)
-  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55 --padding 5
+  # Prompt for percentage if not provided
+  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav
   
   # Update events.csv to point to new clip
-  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55 --update-events
+  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav --percent 50 --update-events
   
   # Specify custom output filename
-  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav 45 55 \\
+  python3 scripts/extract_chirp_segment.py clips/clip_2025-12-27_14-30-00.wav --percent 50 \\
     --output clips/chirp_clean.wav
         """
     )
     parser.add_argument("clip", type=Path, help="Path to source clip file")
-    parser.add_argument("start_sec", type=float, help="Start time in seconds (from beginning of clip)")
-    parser.add_argument("end_sec", type=float, help="End time in seconds (from beginning of clip)")
-    parser.add_argument("--padding", type=float, default=2.0,
-                       help="Seconds to add before start and after end (default: 2.0)")
+    parser.add_argument("--percent", type=float, help="Percentage (1-100) of clip duration to extract segment at")
     parser.add_argument("--output", type=Path, help="Output clip path (default: adds _segment suffix)")
     parser.add_argument("--update-events", action="store_true",
                        help="Update events.csv to point to new clip")
@@ -205,12 +221,44 @@ Examples:
     
     args = parser.parse_args()
     
-    # Extract segment
+    # Get clip duration
+    duration = get_clip_duration(args.clip)
+    if duration is None:
+        sys.exit(1)
+    
+    print(f"Clip duration: {duration:.1f} seconds")
+    
+    # Get percentage (prompt if not provided)
+    percent = args.percent
+    if percent is None:
+        while True:
+            try:
+                percent_input = input("Enter percentage (1-100) of clip to extract segment at: ").strip()
+                percent = float(percent_input)
+                if 1 <= percent <= 100:
+                    break
+                else:
+                    print("Error: Percentage must be between 1 and 100")
+            except ValueError:
+                print("Error: Please enter a valid number")
+            except (EOFError, KeyboardInterrupt):
+                print("\nCancelled")
+                sys.exit(1)
+    
+    # Validate percentage
+    if not (1 <= percent <= 100):
+        print(f"[ERROR] Percentage must be between 1 and 100, got: {percent}")
+        sys.exit(1)
+    
+    # Calculate center point
+    center_sec = (percent / 100.0) * duration
+    print(f"Extracting segment at {percent:.1f}% ({center_sec:.1f}s) with 5s padding before/after")
+    
+    # Extract segment (always 5 seconds before/after)
     new_clip_path = extract_segment_from_clip(
         args.clip,
-        args.start_sec,
-        args.end_sec,
-        padding_sec=args.padding,
+        center_sec,
+        padding_sec=5.0,
         output_path=args.output
     )
     

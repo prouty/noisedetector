@@ -658,16 +658,16 @@ capture-chirp:
 
 extract-segment:
 	@echo "==> Extracting segment from clip..."
-	@if [ -z "$(CLIP)" ] || [ -z "$(START)" ] || [ -z "$(END)" ]; then \
-		echo "Error: CLIP, START, and END must be set."; \
-		echo "  Example: make extract-segment CLIP=clips/clip_2025-12-27_14-30-00.wav START=45 END=55"; \
-		echo "  Optional: PADDING=5 (default: 2 seconds)"; \
+	@if [ -z "$(CLIP)" ]; then \
+		echo "Error: CLIP must be set."; \
+		echo "  Example: make extract-segment CLIP=clips/clip_2025-12-27_14-30-00.wav PERCENT=50"; \
+		echo "  If PERCENT is not provided, you will be prompted for a value (1-100)"; \
 		echo "  Optional: UPDATE_EVENTS=1 (update events.csv)"; \
 		exit 1; \
 	fi
-	@PADDING=$${PADDING:-2}; \
-	UPDATE_FLAG=$$([ -n "$$UPDATE_EVENTS" ] && echo "--update-events" || echo ""); \
-	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/extract_chirp_segment.py "$(CLIP)" $(START) $(END) --padding $$PADDING $$UPDATE_FLAG
+	@UPDATE_FLAG=$$([ -n "$$UPDATE_EVENTS" ] && echo "--update-events" || echo ""); \
+	PERCENT_FLAG=$$([ -n "$$PERCENT" ] && echo "--percent $$PERCENT" || echo ""); \
+	cd $(LOCAL_DIR) && . venv/bin/activate && python3 scripts/extract_chirp_segment.py "$(CLIP)" $$PERCENT_FLAG $$UPDATE_FLAG
 
 open-events:
 	open -a "Microsoft Excel" data/events.csv
