@@ -74,12 +74,23 @@ def load_event_audio(events_file: Path, clips_dir: Path, config: dict) -> List[T
         clip_file = row["clip_file"]
         is_chirp = str(row["is_chirp"]).upper() in ["TRUE", "True", "1"]
         
-        # Resolve clip path
-        clip_path = clips_dir / Path(clip_file).name
-        if not clip_path.exists():
-            clip_path = Path(clip_file)
+        # Resolve clip path - check multiple locations
+        clip_filename = Path(clip_file).name
+        clip_path = None
         
-        if not clip_path.exists():
+        # Try different locations in order of preference
+        possible_paths = [
+            clips_dir / clip_filename,  # clips/clip_xxx.wav
+            clips_dir / "manual" / clip_filename,  # clips/manual/clip_xxx.wav
+            Path(clip_file),  # Full path from CSV
+        ]
+        
+        for possible_path in possible_paths:
+            if possible_path.exists():
+                clip_path = possible_path
+                break
+        
+        if clip_path is None:
             continue
         
         try:
