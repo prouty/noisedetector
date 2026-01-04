@@ -254,12 +254,30 @@ pull-manual-chirps:
 					$(PI_HOST):$(PI_DIR)/clips/manual/ $(LOCAL_DIR)/clips/manual/; \
 				if [ -z "$$KEEP" ] || [ "$$KEEP" != "1" ]; then \
 					echo "==> Deleting transferred clips from Pi..."; \
+					deleted_count=0; \
+					failed_count=0; \
 					while IFS= read -r clip || [ -n "$$clip" ]; do \
 						clip=$$(echo "$$clip" | tr -d "\r\n" | xargs); \
 						if [ -n "$$clip" ]; then \
-							ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/manual/$$clip" 2>/dev/null || true; \
+							echo "  Deleting $$clip..."; \
+							if ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/manual/$$clip" 2>&1; then \
+								if ! ssh $(PI_HOST) "test -f $(PI_DIR)/clips/manual/$$clip" 2>/dev/null; then \
+									deleted_count=$$((deleted_count + 1)); \
+									echo "    ✓ Deleted $$clip"; \
+								else \
+									failed_count=$$((failed_count + 1)); \
+									echo "    ✗ Warning: $$clip still exists on Pi after deletion attempt" >&2; \
+								fi; \
+							else \
+								failed_count=$$((failed_count + 1)); \
+								echo "    ✗ Warning: Failed to delete $$clip from Pi" >&2; \
+							fi; \
 						fi; \
 					done < /tmp/new_manual_chirp_clips.txt; \
+					echo "==> Deleted $$deleted_count clip(s) from Pi"; \
+					if [ $$failed_count -gt 0 ]; then \
+						echo "  Warning: Failed to delete $$failed_count clip(s)" >&2; \
+					fi; \
 					echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/ and deleted from Pi"; \
 				else \
 					echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/ (kept on Pi)"; \
