@@ -24,10 +24,11 @@ help:
 	@echo "  make reload             Reload systemd daemon (after service file changes)"
 	@echo ""
 	@echo "Data & Reports:"
-	@echo "  make pull               Pull events.csv and clips (<=10s) from Pi"
-	@echo "  make pull-chirps        Pull only clips identified as chirps"
-	@echo "  make pull-manual-chirps Pull manually captured chirp clips (3min)"
-	@echo "  make pull-not-chirps    Pull only non-chirp clips"
+	@echo "  make pull               Pull events.csv and clips (<=10s) from Pi (deletes from Pi)"
+	@echo "  make pull-chirps        Pull only clips identified as chirps (deletes from Pi)"
+	@echo "  make pull-manual-chirps Pull manually captured chirp clips (3min, deletes from Pi)"
+	@echo "  make pull-not-chirps    Pull only non-chirp clips (deletes from Pi)"
+	@echo "  Use KEEP=1 to keep clips on Pi: make pull-chirps KEEP=1"
 	@echo "  make report             Generate chirp report from events.csv"
 	@echo "  make workflow           Pull data + generate report"
 	@echo ""
@@ -166,7 +167,18 @@ pull:
 					echo "==> Transferring $$found_count clips (<=10s)..."; \
 					rsync -avz --files-from=/tmp/existing_clips.txt \
 						$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-					echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/"; \
+					if [ -z "$$KEEP" ] || [ "$$KEEP" != "1" ]; then \
+						echo "==> Deleting transferred clips from Pi..."; \
+						while IFS= read -r clip || [ -n "$$clip" ]; do \
+							clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+							if [ -n "$$clip" ]; then \
+								ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/$$clip" 2>/dev/null || true; \
+							fi; \
+						done < /tmp/existing_clips.txt; \
+						echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/ and deleted from Pi"; \
+					else \
+						echo "==> Done! Clips saved to $(LOCAL_DIR)/clips/ (kept on Pi)"; \
+					fi; \
 				else \
 					echo "==> No clips found on Pi (all may have been moved/reviewed)"; \
 				fi; \
@@ -195,7 +207,18 @@ pull-chirps:
 			echo "==> Transferring $$new_count new chirp clips..."; \
 			rsync -avz --files-from=/tmp/new_chirp_clips.txt \
 				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/clips/; \
-			echo "==> Done! Chirp clips saved to $(LOCAL_DIR)/clips/"; \
+			if [ -z "$$KEEP" ] || [ "$$KEEP" != "1" ]; then \
+				echo "==> Deleting transferred clips from Pi..."; \
+				while IFS= read -r clip || [ -n "$$clip" ]; do \
+					clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+					if [ -n "$$clip" ]; then \
+						ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/$$clip" 2>/dev/null || true; \
+					fi; \
+				done < /tmp/new_chirp_clips.txt; \
+				echo "==> Done! Chirp clips saved to $(LOCAL_DIR)/clips/ and deleted from Pi"; \
+			else \
+				echo "==> Done! Chirp clips saved to $(LOCAL_DIR)/clips/ (kept on Pi)"; \
+			fi; \
 		fi; \
 		rm -f /tmp/new_chirp_clips.txt /tmp/filter_summary.txt; \
 	else \
@@ -229,7 +252,18 @@ pull-manual-chirps:
 			if ssh $(PI_HOST) "test -d $(PI_DIR)/clips/manual" 2>/dev/null; then \
 				rsync -avz --files-from=/tmp/new_manual_chirp_clips.txt \
 					$(PI_HOST):$(PI_DIR)/clips/manual/ $(LOCAL_DIR)/clips/manual/; \
-				echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/"; \
+				if [ -z "$$KEEP" ] || [ "$$KEEP" != "1" ]; then \
+					echo "==> Deleting transferred clips from Pi..."; \
+					while IFS= read -r clip || [ -n "$$clip" ]; do \
+						clip=$$(echo "$$clip" | tr -d "\r\n" | xargs); \
+						if [ -n "$$clip" ]; then \
+							ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/manual/$$clip" 2>/dev/null || true; \
+						fi; \
+					done < /tmp/new_manual_chirp_clips.txt; \
+					echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/ and deleted from Pi"; \
+				else \
+					echo "==> Done! Manually captured chirp clips saved to $(LOCAL_DIR)/clips/manual/ (kept on Pi)"; \
+				fi; \
 			else \
 				echo "==> clips/manual/ directory does not exist on Pi"; \
 				echo "    This means no manual clips have been captured yet (or they'\''re in the old location)"; \
@@ -259,7 +293,18 @@ pull-not-chirps:
 			echo "==> Transferring $$new_count new non-chirp clips to training/not_chirp/..."; \
 			rsync -avz --files-from=/tmp/new_not_chirp_clips.txt \
 				$(PI_HOST):$(PI_DIR)/clips/ $(LOCAL_DIR)/training/not_chirp/; \
-			echo "==> Done! Non-chirp clips saved to $(LOCAL_DIR)/training/not_chirp/"; \
+			if [ -z "$$KEEP" ] || [ "$$KEEP" != "1" ]; then \
+				echo "==> Deleting transferred clips from Pi..."; \
+				while IFS= read -r clip || [ -n "$$clip" ]; do \
+					clip=$$(echo "$$clip" | tr -d '\r\n' | xargs); \
+					if [ -n "$$clip" ]; then \
+						ssh $(PI_HOST) "rm -f $(PI_DIR)/clips/$$clip" 2>/dev/null || true; \
+					fi; \
+				done < /tmp/new_not_chirp_clips.txt; \
+				echo "==> Done! Non-chirp clips saved to $(LOCAL_DIR)/training/not_chirp/ and deleted from Pi"; \
+			else \
+				echo "==> Done! Non-chirp clips saved to $(LOCAL_DIR)/training/not_chirp/ (kept on Pi)"; \
+			fi; \
 		fi; \
 		rm -f /tmp/new_not_chirp_clips.txt /tmp/filter_summary.txt; \
 	else \
