@@ -253,8 +253,21 @@ def generate_chirp_report(df: pd.DataFrame, report_date: str) -> str:
     for _, row in chirp_events.iterrows():
         start = row.get("start_timestamp", "")
         end = row.get("end_timestamp", "")
-        duration = row.get("duration_sec", "")
-        max_rms = row.get("max_rms_db", "")
+        
+        # Convert duration to float, handling strings and NaN
+        duration_val = row.get("duration_sec", "")
+        try:
+            duration = f"{float(duration_val):.2f}" if pd.notna(duration_val) and str(duration_val).strip() else ""
+        except (ValueError, TypeError):
+            duration = str(duration_val) if duration_val else ""
+        
+        # Convert max_rms to float, handling strings and NaN
+        max_rms_val = row.get("max_rms_db", "")
+        try:
+            max_rms = f"{float(max_rms_val):.2f}" if pd.notna(max_rms_val) and str(max_rms_val).strip() else ""
+        except (ValueError, TypeError):
+            max_rms = str(max_rms_val) if max_rms_val else ""
+        
         clip = row.get("clip_file", "")
         
         if has_chirp_cols:
@@ -264,7 +277,7 @@ def generate_chirp_report(df: pd.DataFrame, report_date: str) -> str:
             sim_str = ""
         
         lines.append(
-            f"| {start} | {end} | {duration:.2f} | {max_rms:.2f} | {sim_str} | {clip} |"
+            f"| {start} | {end} | {duration} | {max_rms} | {sim_str} | {clip} |"
         )
     
     return "\n".join(lines)
