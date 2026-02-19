@@ -140,6 +140,7 @@ For detailed troubleshooting, see [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING
 
 ## Documentation
 
+- **[User Guide](docs/USER_GUIDE.md)**: Day-to-day operator workflow
 - **[Setup Guide](docs/SETUP_PI.md)**: Detailed installation instructions
 - **[Configuration](docs/CONFIGURATION.md)**: Complete configuration reference
 - **[Tuning Guide](docs/TUNING.md)**: How to tune classification thresholds
